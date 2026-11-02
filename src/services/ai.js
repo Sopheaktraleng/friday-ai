@@ -965,9 +965,6 @@ export async function executeCopilotTool(db, userId, chatId, toolName, toolArgs 
                 return { success: true, recorded: { id: txId, type: "income", amount: amt, currency: curr, category: cat, date, source, note } };
             }
             case "delete_last_transaction": {
-                if (!isOwner(userId, env)) {
-                    return { success: false, error: "Access denied. Only Boss can undo or delete ledger transactions." };
-                }
                 const deleted = await deleteLastTransaction(db, userId, toolArgs.filter || null);
                 return { success: !!deleted, deletedTransaction: deleted };
             }

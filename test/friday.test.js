@@ -824,6 +824,32 @@ describe("F.R.I.D.A.Y. Tactical Assistant Engine", () => {
             expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining("DELETE FROM expenses"));
         });
 
+        it("deleteLastTransaction should correctly filter by type and amount (e.g. 'income 178$')", async () => {
+            let capturedSelect = "";
+            let capturedParams = [];
+            const mockRow = { id: 200, amount: 178, type: "income", currency: "USD", category: "Income", date: "2026-11-02" };
+            const mockDb = {
+                prepare: vi.fn((sql) => {
+                    if (sql.includes("SELECT")) {
+                        capturedSelect = sql;
+                        return {
+                            bind: vi.fn((...args) => {
+                                capturedParams = args;
+                                return { first: vi.fn().mockResolvedValue(mockRow) };
+                            })
+                        };
+                    }
+                    return { bind: vi.fn().mockReturnValue({ run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }) }) };
+                })
+            };
+
+            const deleted = await deleteLastTransaction(mockDb, "guest_123", "income 178$");
+            expect(deleted).toEqual(mockRow);
+            expect(capturedSelect).toContain("type = ?");
+            expect(capturedSelect).toContain("amount = ?");
+            expect(capturedParams).toEqual(["guest_123", "income", 178]);
+        });
+
         it("handleUndoLastTransaction should delete last transaction and send confirmation", async () => {
             fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
                 new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 })

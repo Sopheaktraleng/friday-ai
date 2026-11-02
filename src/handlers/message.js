@@ -71,16 +71,8 @@ import { sendVoiceHelp, handleVoiceMessage } from "../modules/voice/handler.js";
 import { handleAiCopilotQuery, sendFridayTacticalBriefing } from "../modules/copilot/handler.js";
 
 export async function handleUndoLastTransaction(env, chatId, userId, filter = null, message = null) {
-    if (!isOwner(userId, env)) {
-        const guestName = message?.from?.first_name || "there";
-        await sendMessage(
-            env,
-            chatId,
-            `🔒 *Access Restricted*\n\nTransaction undo and deletion is reserved for Boss. If you entered a transaction in error, please let Boss know to adjust it, ${guestName}.`,
-            { parse_mode: "Markdown" }
-        );
-        return;
-    }
+    const isBoss = isOwner(userId, env);
+    const addressName = isBoss ? "Boss" : (message?.from?.first_name || "there");
 
     const deleted = await deleteLastTransaction(env.DB, userId, filter);
     if (!deleted) {
@@ -88,7 +80,7 @@ export async function handleUndoLastTransaction(env, chatId, userId, filter = nu
         await sendMessage(
             env,
             chatId,
-            `ℹ️ *No Transactions Found*\n\nBoss, there are no recorded transactions${targetDesc} in your ledger to undo.`,
+            `ℹ️ *No Transactions Found*\n\n${addressName}, there are no recorded transactions${targetDesc} in your ledger to undo.`,
             { parse_mode: "Markdown" }
         );
         return;
@@ -112,7 +104,7 @@ export async function handleUndoLastTransaction(env, chatId, userId, filter = nu
             `🏷️ *Category:* *${cleanMd(capitalize(deleted.category))}*`,
             `📅 *Date:* \`${deleted.date}\``,
             ``,
-            `_Successfully removed from your ledger, Boss._`
+            `_Successfully removed from your ledger, ${addressName}._`
         ].join("\n"),
         {
             parse_mode: "Markdown",
@@ -974,12 +966,14 @@ export async function handleMessage(message, env, origin) {
             return;
         }
 
-        // Targeted Natural Undo (e.g. "undo coffee", "delete lunch", "undo grab")
-        const undoMatch = lower.match(/^(?:undo|delete|remove|cancel)\s+(?:my\s+)?(?:last\s+)?(\w+)$/);
-        if (undoMatch && !["all", "history", "everything", "task", "tasks", "reminder", "reminders"].includes(undoMatch[1])) {
-            const targetFilter = undoMatch[1];
-            await handleUndoLastTransaction(env, chatId, userId, targetFilter, message);
-            return;
+        // Targeted Natural Undo (e.g. "undo coffee", "delete lunch", "delete income 178$", "undo 178$")
+        const undoMatch = lower.match(/^(?:undo|delete|remove|cancel)\s+(?:my\s+)?(?:last\s+)?([a-zA-Z0-9$៛\s.'-]+)$/);
+        if (undoMatch) {
+            const targetFilter = undoMatch[1].trim();
+            if (!["all", "history", "everything", "task", "tasks", "reminder", "reminders", "chat", "ledger", "today"].includes(targetFilter)) {
+                await handleUndoLastTransaction(env, chatId, userId, targetFilter, message);
+                return;
+            }
         }
 
         // 5. Natural Income: e.g. "+500 salary", "income 500", "40$ income", "500$ salary", "earned $50 freelance"

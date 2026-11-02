@@ -296,14 +296,37 @@ export async function deleteLastTransaction(db, userId, filterType = null) {
     try {
         let query = "SELECT id, amount, category, type, currency, date FROM expenses WHERE user_id = ?";
         const params = [userId];
+
         if (filterType && filterType !== "any" && filterType !== "all") {
             const cleanFilter = filterType.toLowerCase().trim();
-            if (cleanFilter === "expense" || cleanFilter === "income") {
+
+            let type = null;
+            if (/\bincome\b/.test(cleanFilter)) type = "income";
+            else if (/\bexpense\b/.test(cleanFilter)) type = "expense";
+
+            const amtMatch = cleanFilter.match(/(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel)?/);
+            let amount = null;
+            if (amtMatch) {
+                const val = parseFloat(amtMatch[1].replace("$", ""));
+                if (!isNaN(val) && val > 0) amount = val;
+            }
+
+            const remainder = cleanFilter
+                .replace(/\b(income|expense)\b/g, "")
+                .replace(/(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel)?/g, "")
+                .trim();
+
+            if (type) {
                 query += " AND type = ?";
-                params.push(cleanFilter);
-            } else {
+                params.push(type);
+            }
+            if (amount !== null) {
+                query += " AND amount = ?";
+                params.push(amount);
+            }
+            if (remainder) {
                 query += " AND (LOWER(category) = ? OR LOWER(merchant) LIKE ? OR LOWER(note) LIKE ?)";
-                params.push(cleanFilter, `%${cleanFilter}%`, `%${cleanFilter}%`);
+                params.push(remainder, `%${remainder}%`, `%${remainder}%`);
             }
         }
         query += " ORDER BY id DESC LIMIT 1";

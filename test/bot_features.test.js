@@ -1503,7 +1503,7 @@ describe("Bot Improvements & Stability", () => {
             fetchSpy.mockRestore();
         });
 
-        it("handleUndoLastTransaction should restrict guests and only allow Boss to undo transactions", async () => {
+        it("handleUndoLastTransaction should allow both guests and Boss to undo their own transactions", async () => {
             const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
                 Promise.resolve(new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }))
             );
@@ -1539,15 +1539,16 @@ describe("Bot Improvements & Stability", () => {
 
             const { handleUndoLastTransaction } = await import("../src/handlers/message.js");
 
-            // 1. Guest attempt should be rejected with polite access notice
+            // 1. Guest attempt should succeed and address Sarah
             await handleUndoLastTransaction(mockEnv, guestUserId, guestUserId, "coffee", guestMessage);
             const guestCall = fetchSpy.mock.calls[0];
             const guestBody = JSON.parse(guestCall[1].body);
-            expect(guestBody.text).toContain("Access Restricted");
+            expect(guestBody.text).toContain("Transaction Undone");
             expect(guestBody.text).toContain("Sarah");
-            expect(guestBody.text).toContain("reserved for Boss");
+            expect(guestBody.text).toContain("$2.50");
+            expect(guestBody.text).toContain("Coffee");
 
-            // 2. Boss attempt should succeed cleanly
+            // 2. Boss attempt should succeed cleanly and address Boss
             await handleUndoLastTransaction(mockEnv, 849550186, 849550186, "coffee", null);
             const bossCall = fetchSpy.mock.calls[1];
             const bossBody = JSON.parse(bossCall[1].body);
