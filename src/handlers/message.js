@@ -756,25 +756,9 @@ export async function handleMessage(message, env, origin) {
         return;
     }
 
-    // 3. Movie Watchlist (Retired for focus)
-    if (
-        text.startsWith("/watch") || 
-        text.startsWith("/movie") || 
-        text.startsWith("/film") || 
-        text.startsWith("/watchlist") || 
-        text.startsWith("/wl")
-    ) {
-        await sendMessage(
-            env,
-            chatId,
-            `💡 *Streamlined Workspace*\n\nThe entertainment watchlist has been removed to keep this bot fast and focused on *Cashflow & Work Productivity*.\n\nUse \`/hub\` to view your active workspaces.`,
-            {
-                parse_mode: "Markdown",
-                reply_markup: {
-                    inline_keyboard: [[{ text: "🌟 Open Hub", callback_data: "hub" }]]
-                }
-            }
-        );
+    // 3. Movie Watchlist (Retired)
+    if (text.startsWith("/watch") || text.startsWith("/movie") || text.startsWith("/film") || text.startsWith("/watchlist")) {
+        await sendMainHub(env, chatId, userId, message.from, origin);
         return;
     }
 

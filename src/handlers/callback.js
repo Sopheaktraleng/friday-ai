@@ -432,19 +432,6 @@ export async function handleCallback(callback, env, origin) {
         return;
     }
 
-    if (data === "work_standup" || data === "work_standup_copy" || data === "work_standup_polish" || data.startsWith("work_report")) {
-        await answerCallback(env, callback.id, { text: "Scrum standups and reports removed." });
-        await handleListTodayTasksCommand(env, chatId, userId, messageId);
-        return;
-    }
-
-    // --- Retired Movie Recommender & Watchlist Callbacks ---
-    if (data === "movie_hub" || data === "watchlist" || data.startsWith("wl_")) {
-        await answerCallback(env, callback.id, { text: "Watchlist feature has been retired." });
-        await sendMainHub(env, chatId, userId, callback.from, origin, messageId);
-        return;
-    }
-
     if (data === "copilot_help") {
         await handleAiCopilotQuery(env, chatId, userId, "", callback.from, messageId);
         return;

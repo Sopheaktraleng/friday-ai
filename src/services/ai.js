@@ -591,6 +591,18 @@ CRITICAL IDENTITY & SAFETY DIRECTIVES:
 
     const userLabel = isOwner ? "Boss" : userName;
 
+    // Streamline telemetry JSON: strip redundant structures already provided in memory/RAG blocks
+    const telemetry = {
+        budget: context?.budget,
+        totals: context?.totals,
+        topMonthCategories: context?.topMonthCategories,
+        recentTransactions: context?.recentTransactions,
+        todayWorkTasks: context?.todayWorkTasks,
+        recentWorkTasks: context?.recentWorkTasks,
+        activeReminders: context?.activeReminders
+    };
+    if (context?.summary) telemetry.summary = context.summary;
+
     return `${personaIdentity}
 Exchange rate: 1 USD = 4,000 KHR.
 Today's Date: ${context?.currentDate || today()}, Time: ${context?.currentTime || currentTime()} (${context?.timezone || TIME_ZONE}).
@@ -598,7 +610,7 @@ Preferred Display Currency: ${context?.displayCurrency || "USD"}.
 Session Entropy Seed: ${entropySeed}.
 ${memoryBlock}${ragBlock}
 === ONBOARD LIVE TELEMETRY (Reference ONLY when ${userLabel} explicitly asks about money, expenses, work, or schedule) ===
-${JSON.stringify(context, null, 2)}
+${JSON.stringify(telemetry)}
 ===================================================================================================================
 
 ${userLabel} message: "${userQuery}"
@@ -1035,7 +1047,7 @@ export async function askAiCopilot(env, userQuery, context) {
                 const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`;
                 
                 const modelGenConfig = { temperature };
-                if (!model.includes("lite") && (model.includes("3.5") || model.includes("3.6") || model.includes("3.8") || model.includes("2.5"))) {
+                if (model.includes("flash") || model.includes("2.5") || model.includes("3.")) {
                     modelGenConfig.thinkingConfig = { thinkingBudget: 0 };
                 }
 
