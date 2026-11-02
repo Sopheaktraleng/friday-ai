@@ -303,8 +303,8 @@ export function buildSmartLocalFallback(query, context = {}) {
         else greeting = "Good evening";
 
         return {
-            reply: `${greeting}, ${title}! Everything is running smoothly. How can I help you today?`,
-            voice_summary: `${greeting} ${title}! How can I help you today?`
+            reply: `${greeting}, ${title}! Ready whenever you are. Have a great day ahead! ☕`,
+            voice_summary: `${greeting} ${title}! Ready whenever you are. Have a great day ahead.`
         };
     }
     if (q.includes("how are you") || q.includes("how's it going") || q.includes("how you doing")) {

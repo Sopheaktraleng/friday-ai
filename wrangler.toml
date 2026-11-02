@@ -11,7 +11,7 @@ database_name = "cashflow_bot"
 database_id = "7419dbb1-5978-4d6d-b471-4546ea9bd0d6"
 
 [triggers]
-crons = ["* * * * *"] # 1-min checks for reminders, 7:50 AM ICT Wake-Up Call, and 8:00 AM ICT Good Morning Check-in
+crons = ["* * * * *"] # 1-min checks for reminders and 8:00 AM ICT Good Morning greeting
 
 [ai]
 binding = "AI"

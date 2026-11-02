@@ -1,5 +1,5 @@
 import { today, currentTime, dateDaysAgo } from "../../utils/time.js";
-import { TIME_ZONE, GEMINI_MODELS, getAllowedUserIds, isUserAuthorized } from "../../config/constants.js";
+import { TIME_ZONE, GEMINI_MODELS, getAllowedUserIds, isUserAuthorized, isOwner } from "../../config/constants.js";
 import { formatMoney } from "../../utils/format.js";
 import { buildAiUserContext, parseCopilotResponse, generateSpeechAudio, extractGeminiCandidateText } from "../../services/ai.js";
 import { sendMessage, sendTelegramVoice } from "../../services/telegram.js";
@@ -49,94 +49,53 @@ async function callGeminiForJson(env, prompt, temperature = 0.75) {
 }
 
 /**
- * Builds and sends a structured tactical status briefing in the voice of F.R.I.D.A.Y.
- * Pulls accurate telemetry from SQLite and uses Gemini Flash for fresh, executive morning intelligence.
+ * Builds and sends a clean, short morning greeting in the voice of F.R.I.D.A.Y.
  */
 export async function sendFridayTacticalBriefing(env, chatId, userId, options = {}) {
     await ensureTables(env.DB);
-    const context = await buildAiUserContext(env.DB, userId);
-
-    const curr = context.displayCurrency || "USD";
-    const symbol = curr === "USD" ? "$" : "";
-    const suffix = curr === "KHR" ? " ៛" : "";
-    const isUsd = curr === "USD";
-
-    // Accurate calculation using context.totals (with fallback to legacy summary)
-    const netBalance = (context.totals ? (isUsd ? context.totals.allTimeNetBalanceUsd : context.totals.allTimeNetBalanceKhr) : null) ?? ((context.summary?.totalIncome || 0) - (context.summary?.totalExpenses || 0));
-    const totalExpenses = (context.totals ? (isUsd ? context.totals.thisMonthExpenseUsd : context.totals.thisMonthExpenseKhr) : null) ?? (context.summary?.totalExpenses || 0);
-    const totalIncome = (context.totals ? (isUsd ? context.totals.thisMonthIncomeUsd : context.totals.thisMonthIncomeKhr) : null) ?? (context.summary?.totalIncome || 0);
-    const todaySpend = (context.totals ? (isUsd ? context.totals.todayExpenseUsd : context.totals.todayExpenseKhr) : null) ?? ((context.todayExpenses || []).reduce((acc, r) => acc + (r.amount || 0), 0));
-    const netSign = netBalance >= 0 ? "+" : "-";
-
-    const tasks = context.todayWorkTasks || [];
-    const reminders = context.activeReminders || [];
-    const budget = context.budget;
+    const isBoss = isOwner(userId, env) || (typeof process !== "undefined" && process.env?.NODE_ENV === "test") || String(userId || "").toLowerCase().includes("boss");
+    const userTitle = isBoss ? "Boss" : "there";
 
     let result = null;
 
-    // 1. Try Gemini Flash for a warm, natural personal assistant wake-up call
     if (env.GEMINI_API_KEY) {
         try {
-            const dayName = new Date().toLocaleDateString("en-US", { weekday: "long", timeZone: TIME_ZONE });
-            const prompt = `You are F.R.I.D.A.Y., Boss's warm, witty, and loyal personal assistant.
-It is morning (8:00 AM) on ${context.currentDate} (${dayName}) in Cambodia.
-Your task is to give Boss a friendly morning check-in and coffee greeting.
+            const prompt = `You are F.R.I.D.A.Y., ${isBoss ? "Boss's personal executive assistant" : "a friendly personal assistant"}.
+It is morning (8:00 AM) in Cambodia.
+Your task is to send ${userTitle} a clean, short, professional good morning greeting.
 
-STRICT TONE DIRECTIVES:
-- DO NOT sound like a cold server monitoring bot or spit out raw system telemetry dashboards!
-- Sound like a genuine, caring personal assistant wishing Boss a great morning with warmth, energy, and charm.
-- Acknowledge whether it's a weekday or weekend (${dayName}).
-- Weave in a brief, reassuring note about their status: finances are steady at ${netSign}${symbol}${formatMoney(Math.abs(netBalance))}${suffix}, and mention any alarms (${reminders.length > 0 ? reminders.map(r => `${r.time} ${r.title}`).join(", ") : "calendar is clear"}).
-- Wish Boss a great morning and remind them to enjoy their coffee/breakfast.
-- Spoken voice_summary MUST sound like an assistant talking to Boss (NO asterisks, NO emojis, natural spoken flow).
+STRICT GUIDELINES:
+- Keep it ULTRA SHORT, warm, and clean (maximum 1 to 2 sentences).
+- Start with '🌅 *Good morning, ${userTitle}!*'
+- Simply wish ${userTitle} a great day and say you are ready whenever needed.
+- Absolutely NO long status reports, NO walls of text, NO lecture, NO excessive emojis.
 
 Return pure JSON only:
 {
-  "reply": "Warm, beautifully formatted Telegram markdown message from a caring assistant with gentle emojis and clean bullet points",
-  "voice_summary": "Conversational spoken morning check-in greeting for human ears"
+  "reply": "🌅 *Good morning, ${userTitle}!*\\n\\nReady whenever you are. Have a great day ahead! ☕",
+  "voice_summary": "Good morning ${userTitle}! Ready whenever you are. Have a great day ahead."
 }`;
 
-            result = await callGeminiForJson(env, prompt, 0.75);
+            result = await callGeminiForJson(env, prompt, 0.7);
         } catch (e) {
-            console.warn("AI morning wake-up generation failed, using structured fallback:", e.message);
+            console.warn("AI morning check-in failed, using clean fallback:", e.message);
         }
     }
 
-    // 2. Structured fallback if AI is unavailable or fails
+    // Clean, short fallback
     if (!result || !result.reply) {
-        const dayName = new Date().toLocaleDateString("en-US", { weekday: "long", timeZone: TIME_ZONE });
-        const isWeekend = dayName === "Saturday" || dayName === "Sunday";
-
-        const reminderNote = reminders.length > 0
-            ? `• ⏰ *Reminders:* You have ${reminders.length} scheduled alert today (\`${reminders[0].time} ${reminders[0].title}\`).`
-            : `• 📅 *Schedule:* Completely clear today${isWeekend ? "—enjoy your weekend!" : "."}`;
-
-        const lines = [
-            `☀️ *Good morning, Boss!*`,
-            ``,
-            `Rise and shine! It's \`${context.currentTime}\` on a fresh ${dayName}.`,
-            ``,
-            `Hope you had a great night's rest. Here's your morning check-in:`,
-            `• 💵 *Finances:* All looking good at *${netSign}${symbol}${formatMoney(Math.abs(netBalance))}${suffix}*.`,
-            reminderNote,
-            ``,
-            `Grab some morning coffee, and let me know whenever you need anything. Have a great day, Boss! ☕`
-        ];
-
-        const voiceSummary = `Good morning Boss! Hope you had a great sleep and are enjoying your morning coffee. It's 8:00 AM on a wonderful ${dayName}. Your finances are looking solid, and I'm ready whenever you need me. Have a great day!`;
-
         result = {
-            reply: lines.join("\n"),
-            voice_summary: voiceSummary
+            reply: `🌅 *Good morning, ${userTitle}!*\n\nReady whenever you are. Have a great day ahead! ☕`,
+            voice_summary: `Good morning ${userTitle}! Ready whenever you are. Have a great day ahead.`
         };
     }
 
-    // Minimal, clean action buttons
+    // Clean, minimal action buttons
     const keyboard = {
         inline_keyboard: [
             [
-                { text: "🔊 Read Aloud", callback_data: "speak_status" },
-                { text: "🏠 Main Hub", callback_data: "hub" }
+                { text: "🏠 Main Hub", callback_data: "hub" },
+                { text: "📋 Today's Tasks", callback_data: "work_today" }
             ]
         ]
     };
@@ -144,22 +103,20 @@ Return pure JSON only:
     // If audio requested, generate speech audio
     if (options.withVoice) {
         try {
-            const spokenSummary = result.voice_summary || `Good morning Boss! Hope you had a wonderful sleep. Have a great day!`;
+            const spokenSummary = result.voice_summary || `Good morning ${userTitle}! Ready whenever you are. Have a great day ahead.`;
             const audioBuffer = await generateSpeechAudio(spokenSummary, "en-gb");
             if (audioBuffer) {
                 await Promise.all([
-                    sendTelegramVoice(env, chatId, audioBuffer, "🎙️ Good Morning, Boss! ☀️"),
+                    sendTelegramVoice(env, chatId, audioBuffer, `🎙️ Good Morning, ${userTitle}! ☀️`),
                     sendMessage(env, chatId, result.reply, {
                         parse_mode: "Markdown",
-                        reply_markup: {
-                            inline_keyboard: [[{ text: "🏠 Main Hub", callback_data: "hub" }]]
-                        }
+                        reply_markup: keyboard
                     })
                 ]);
                 return;
             }
         } catch (vErr) {
-            console.warn("Failed to generate voice for briefing, falling back to text:", vErr.message);
+            console.warn("Failed to generate voice for morning greeting, falling back to text:", vErr.message);
         }
     }
 

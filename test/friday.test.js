@@ -233,7 +233,7 @@ describe("F.R.I.D.A.Y. Tactical Assistant Engine", () => {
             expect(fetchSpy).toHaveBeenCalled();
             const payload = JSON.parse(fetchSpy.mock.calls[0][1].body);
             expect(payload.text).toContain("Good morning, Boss");
-            expect(payload.text).toContain("Finances");
+            expect(payload.text).toContain("Ready whenever you are");
         });
 
         it("should handle /briefing on and /briefing off to configure daily broadcasts", async () => {
