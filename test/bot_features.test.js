@@ -156,6 +156,47 @@ describe("Bot Improvements & Stability", () => {
             expect(p4.targetDateStr).toBeNull();
             expect(p4.title).toBe("Bring lunch box");
             expect(p4.frequency).toBe("daily");
+
+            // 5. Month-first date: "on Nov 2 at 6pm Take ice"
+            const p5 = parseReminderInput("on Nov 2 at 6pm Take ice", fakeNow);
+            expect(p5.targetDateStr).toBe("2026-11-02");
+            expect(p5.timeStr).toBe("18:00");
+            expect(p5.title).toBe("Take ice");
+            expect(p5.frequency).toBe("once");
+        });
+
+        it("should display expired past reminders as completed and offer re-arm in sendReminderTimeMenu", async () => {
+            const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+                new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 })
+            );
+
+            const mockDb = {
+                prepare: vi.fn().mockReturnValue({
+                    bind: vi.fn().mockReturnValue({
+                        first: vi.fn().mockResolvedValue({
+                            id: 8,
+                            title: "Take ice and fish source",
+                            reminder_time: "18:00",
+                            target_date: "2026-10-29",
+                            frequency: "once",
+                            is_active: 0
+                        })
+                    })
+                })
+            };
+
+            const mockEnv = { DB: mockDb, TELEGRAM_BOT_TOKEN: "mock_token" };
+            await sendReminderTimeMenu(mockEnv, 123456, "849550186", 8);
+
+            expect(fetchSpy).toHaveBeenCalled();
+            const payload = JSON.parse(fetchSpy.mock.calls[0][1].body);
+            expect(payload.text).toContain("Take ice and fish source");
+            expect(payload.text).toContain("Completed");
+
+            const buttons = payload.reply_markup.inline_keyboard.flat();
+            expect(buttons.some(b => b.text.includes("Re-arm for Today"))).toBe(true);
+
+            fetchSpy.mockRestore();
         });
 
         it("should render clean symmetrical 3-row System Settings menu without redundant user access", async () => {

@@ -1,7 +1,8 @@
-import { TIME_ZONE, isUserAuthorized } from "../../config/constants.js";
+import { TIME_ZONE, isUserAuthorizedAsync, hasUserPermission, isOwner } from "../../config/constants.js";
 import { today, getPreviousWorkdayDate } from "../../utils/time.js";
 import { getWorkCategoryIcon } from "../../utils/format.js";
 import { ensureTables } from "../../db/schema.js";
+import { getAuthorizedUser } from "../../db/queries.js";
 import { sendMessage } from "../../services/telegram.js";
 
 export async function processDueReminders(env) {
@@ -15,6 +16,14 @@ export async function processDueReminders(env) {
         hour12: false
     }).format(now); // e.g. "17:30"
 
+    const tenMinsAgo = new Date(now.getTime() - 10 * 60 * 1000);
+    const tenMinsAgoStr = new Intl.DateTimeFormat("en-GB", {
+        timeZone: TIME_ZONE,
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false
+    }).format(tenMinsAgo);
+
     const weekdayStr = new Intl.DateTimeFormat("en-US", {
         timeZone: TIME_ZONE,
         weekday: "short"
@@ -23,19 +32,40 @@ export async function processDueReminders(env) {
     const todayStr = today();
     const isWeekday = weekdayStr !== "Sat" && weekdayStr !== "Sun";
 
-    const { results } = await env.DB.prepare(`
-        SELECT id, user_id, chat_id, title, reminder_time, target_date, frequency, type 
-        FROM reminders 
-        WHERE is_active = 1 
-          AND reminder_time = ? 
-          AND (last_sent_date IS NULL OR last_sent_date != ?)
-    `).bind(timeStr, todayStr).all();
+    const isMidnightWrap = tenMinsAgoStr > timeStr;
+    const query = isMidnightWrap
+        ? `
+            SELECT id, user_id, chat_id, title, reminder_time, target_date, frequency, type 
+            FROM reminders 
+            WHERE is_active = 1 
+              AND (reminder_time = ? OR reminder_time <= ? OR reminder_time >= ?)
+              AND (last_sent_date IS NULL OR last_sent_date != ?)
+        `
+        : `
+            SELECT id, user_id, chat_id, title, reminder_time, target_date, frequency, type 
+            FROM reminders 
+            WHERE is_active = 1 
+              AND (reminder_time = ? OR (reminder_time <= ? AND reminder_time >= ?))
+              AND (last_sent_date IS NULL OR last_sent_date != ?)
+        `;
+
+    const { results } = await env.DB.prepare(query)
+        .bind(timeStr, timeStr, tenMinsAgoStr, todayStr)
+        .all();
 
     if (!results || results.length === 0) return;
 
     for (const r of results) {
-        if (!isUserAuthorized(r.user_id, env)) {
+        const isAuth = await isUserAuthorizedAsync(env.DB, r.user_id, env);
+        if (!isAuth) {
             continue;
+        }
+
+        if (!isOwner(r.user_id, env)) {
+            const guestUser = await getAuthorizedUser(env.DB, r.user_id);
+            if (!hasUserPermission("reminders", guestUser?.permissions, false)) {
+                continue;
+            }
         }
 
         // If reminder is scheduled for a specific date, only trigger on that date

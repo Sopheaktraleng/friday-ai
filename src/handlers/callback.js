@@ -1,5 +1,5 @@
 import { TIME_ZONE, EXCHANGE_RATE, isUserAuthorized, isUserAuthorizedAsync, isOwner, OWNER_USER_ID, hasUserPermission } from "../config/constants.js";
-import { today, currentTime } from "../utils/time.js";
+import { today, currentTime, getTomorrowDate } from "../utils/time.js";
 import { formatMoney, cleanMd, capitalize } from "../utils/format.js";
 import { ensureTables } from "../db/schema.js";
 import {
@@ -893,16 +893,29 @@ export async function handleCallback(callback, env, origin) {
         const id = parseInt(data.slice(22), 10);
         await ensureTables(env.DB);
         const existing = await env.DB.prepare(
-            "SELECT id, is_active, title FROM reminders WHERE id = ? AND user_id = ?"
+            "SELECT id, is_active, title, reminder_time, target_date FROM reminders WHERE id = ? AND user_id = ?"
         ).bind(id, userId).first();
 
         if (existing) {
             const newActive = existing.is_active ? 0 : 1;
-            await env.DB.prepare("UPDATE reminders SET is_active = ?, chat_id = ? WHERE id = ?")
-                .bind(newActive, String(chatId), id)
-                .run();
-            const statusTxt = newActive ? `🟢 "${existing.title}" is now ON!` : `⚪ "${existing.title}" is now OFF.`;
-            await answerCallback(env, callback.id, { text: statusTxt });
+            const todayStr = today();
+            const curTimeStr = currentTime();
+            const isPast = existing.target_date && existing.target_date < todayStr;
+
+            if (newActive === 1 && isPast) {
+                const nextDate = (existing.reminder_time && existing.reminder_time > curTimeStr) ? todayStr : getTomorrowDate();
+                await env.DB.prepare(
+                    "UPDATE reminders SET is_active = 1, target_date = ?, last_sent_date = NULL, chat_id = ? WHERE id = ?"
+                ).bind(nextDate, String(chatId), id).run();
+                const dayWord = nextDate === todayStr ? "Today" : "Tomorrow";
+                await answerCallback(env, callback.id, { text: `🔔 Re-armed "${existing.title}" for ${dayWord} at ${existing.reminder_time}!` });
+            } else {
+                await env.DB.prepare("UPDATE reminders SET is_active = ?, chat_id = ? WHERE id = ?")
+                    .bind(newActive, String(chatId), id)
+                    .run();
+                const statusTxt = newActive ? `🟢 "${existing.title}" is now ON!` : `⚪ "${existing.title}" is now OFF.`;
+                await answerCallback(env, callback.id, { text: statusTxt });
+            }
         }
         await sendReminderTimeMenu(env, chatId, userId, id, messageId);
         return;
@@ -919,9 +932,17 @@ export async function handleCallback(callback, env, origin) {
         const id = parseInt(parts[1], 10);
         const newTime = `${parts[2]}:${parts[3]}`;
         await ensureTables(env.DB);
+        const existing = await env.DB.prepare(
+            "SELECT target_date FROM reminders WHERE id = ? AND user_id = ?"
+        ).bind(id, userId).first();
+        const todayStr = today();
+        const isPast = existing?.target_date && existing.target_date < todayStr;
+        const curTimeStr = currentTime();
+        const nextDate = isPast ? ((newTime > curTimeStr) ? todayStr : getTomorrowDate()) : existing?.target_date;
+
         await env.DB.prepare(
-            "UPDATE reminders SET reminder_time = ?, is_active = 1, chat_id = ? WHERE id = ? AND user_id = ?"
-        ).bind(newTime, String(chatId), id, userId).run();
+            "UPDATE reminders SET reminder_time = ?, target_date = ?, is_active = 1, last_sent_date = NULL, chat_id = ? WHERE id = ? AND user_id = ?"
+        ).bind(newTime, nextDate || null, String(chatId), id, userId).run();
 
         await answerCallback(env, callback.id, { text: `⏰ Time updated to ${newTime}!` });
         await sendRemindersMenu(env, chatId, userId, messageId);
@@ -940,11 +961,17 @@ export async function handleCallback(callback, env, origin) {
             minute: "2-digit",
             hour12: false
         }).format(targetDate);
+        const targetDateStr = new Intl.DateTimeFormat("en-CA", {
+            timeZone: TIME_ZONE,
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit"
+        }).format(targetDate);
 
         await ensureTables(env.DB);
         await env.DB.prepare(
-            "UPDATE reminders SET reminder_time = ?, frequency = 'once', is_active = 1, chat_id = ? WHERE id = ? AND user_id = ?"
-        ).bind(targetTimeStr, String(chatId), id, userId).run();
+            "UPDATE reminders SET reminder_time = ?, target_date = ?, frequency = 'once', is_active = 1, last_sent_date = NULL, chat_id = ? WHERE id = ? AND user_id = ?"
+        ).bind(targetTimeStr, targetDateStr, String(chatId), id, userId).run();
 
         await answerCallback(env, callback.id, { text: `⏱️ Set to ${targetTimeStr} (in ${mins}m)!` });
         await sendRemindersMenu(env, chatId, userId, messageId);

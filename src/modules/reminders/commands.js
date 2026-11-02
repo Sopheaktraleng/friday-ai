@@ -161,6 +161,13 @@ export function parseReminderInput(raw, now = new Date()) {
         nov: 11, november: 11, dec: 12, december: 12
     };
 
+    // Check "today"
+    if (/\btoday\b/i.test(workingStr)) {
+        workingStr = workingStr.replace(/\btoday\b/i, "").trim();
+        targetDateStr = `${curYear}-${String(curMonth).padStart(2, "0")}-${String(curDay).padStart(2, "0")}`;
+        frequency = "once";
+    }
+
     // Check "tomorrow"
     if (/\btomorrow\b/i.test(workingStr)) {
         workingStr = workingStr.replace(/\btomorrow\b/i, "").trim();
@@ -169,7 +176,24 @@ export function parseReminderInput(raw, now = new Date()) {
         frequency = "once";
     }
 
-    // Check "on (the )?(\d{1,2})(?:st|nd|rd|th)?(?:\s+(?:of\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)?"
+    // Check "Nov 2" / "on Nov 2" / "November 2nd" (Month first)
+    if (!targetDateStr) {
+        const monthDayMatch = workingStr.match(/\b(?:on\s+)?(?:the\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{1,2})(?:st|nd|rd|th)?\b(?!\s*:)/i);
+        if (monthDayMatch) {
+            const mKey = monthDayMatch[1].toLowerCase();
+            const dayNum = parseInt(monthDayMatch[2], 10);
+            if (monthMap[mKey] && dayNum >= 1 && dayNum <= 31) {
+                let targetMonth = monthMap[mKey];
+                let targetYear = curYear;
+                if (targetMonth < curMonth) targetYear += 1;
+                targetDateStr = `${targetYear}-${String(targetMonth).padStart(2, "0")}-${String(dayNum).padStart(2, "0")}`;
+                workingStr = workingStr.replace(monthDayMatch[0], "").trim();
+                frequency = "once";
+            }
+        }
+    }
+
+    // Check "on (the )?(\d{1,2})(?:st|nd|rd|th)?(?:\s+(?:of\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)?" (Day first)
     if (!targetDateStr) {
         const dateMatch = workingStr.match(/\b(?:on\s+)?(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)?(?:\s+(?:of\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)?\b(?!\s*:)/i);
         if (dateMatch) {
@@ -199,21 +223,15 @@ export function parseReminderInput(raw, now = new Date()) {
         }
     }
 
-    // Check "Oct 30" / "October 30th"
-    if (!targetDateStr) {
-        const monthDayMatch = workingStr.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{1,2})(?:st|nd|rd|th)?\b(?!\s*:)/i);
-        if (monthDayMatch) {
-            const mKey = monthDayMatch[1].toLowerCase();
-            const dayNum = parseInt(monthDayMatch[2], 10);
-            if (monthMap[mKey] && dayNum >= 1 && dayNum <= 31) {
-                let targetMonth = monthMap[mKey];
-                let targetYear = curYear;
-                if (targetMonth < curMonth) targetYear += 1;
-                targetDateStr = `${targetYear}-${String(targetMonth).padStart(2, "0")}-${String(dayNum).padStart(2, "0")}`;
-                workingStr = workingStr.replace(monthDayMatch[0], "").trim();
-                frequency = "once";
-            }
-        }
+    // Check explicit frequency keywords
+    if (/\b(every\s*day|daily)\b/i.test(workingStr)) {
+        workingStr = workingStr.replace(/\b(every\s*day|daily)\b/i, "").trim();
+        frequency = "daily";
+        targetDateStr = null;
+    } else if (/\b(every\s*weekday|weekdays|mon-fri|monday to friday)\b/i.test(workingStr)) {
+        workingStr = workingStr.replace(/\b(every\s*weekday|weekdays|mon-fri|monday to friday)\b/i, "").trim();
+        frequency = "weekdays";
+        targetDateStr = null;
     }
 
     // If date was found, but NO time, default to 09:00

@@ -111,6 +111,17 @@ export function getPreviousWorkdayDate() {
     }
 }
 
+export function getTomorrowDate() {
+    const now = new Date();
+    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    return new Intl.DateTimeFormat("en-CA", {
+        timeZone: TIME_ZONE,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+    }).format(tomorrow);
+}
+
 /**
  * Normalizes any human-entered or AI-generated reminder time into standard 24-hour HH:mm.
  * Supports:

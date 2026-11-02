@@ -2,6 +2,7 @@ import { TIME_ZONE } from "../../config/constants.js";
 import { ensureTables } from "../../db/schema.js";
 import { safeEditOrSendMessage } from "../../services/telegram.js";
 import { cleanMd } from "../../utils/format.js";
+import { today } from "../../utils/time.js";
 
 export async function sendPromptAddReminder(env, chatId, messageId = null) {
     const text = [
@@ -42,11 +43,14 @@ export async function sendRemindersMenu(env, chatId, userId, messageId = null) {
     ).bind(userId).all();
 
     const reminders = results || [];
+    const todayStr = today();
 
     const customReminders = reminders.filter(
         r => r.type !== "standup" && r.type !== "expense_log"
     );
-    const activeCustom = customReminders.filter(r => r.is_active).length;
+    const activeCustom = customReminders.filter(
+        r => r.is_active && (!r.target_date || r.target_date >= todayStr)
+    ).length;
 
     const totalActive = activeCustom;
     const activeSummary = totalActive === 1 ? "1 active alert" : `${totalActive} active alerts`;
@@ -56,7 +60,9 @@ export async function sendRemindersMenu(env, chatId, userId, messageId = null) {
         customTextList = `_No personal reminders scheduled._`;
     } else {
         customTextList = customReminders.map((r) => {
-            const status = r.is_active ? "🔔" : "🔕";
+            const isPast = r.target_date && r.target_date < todayStr;
+            const isCompleted = isPast && !r.is_active;
+            const status = isCompleted ? "🏁" : (r.is_active ? "🔔" : "🔕");
             let timeLabel = `\`${r.reminder_time}\``;
             if (r.target_date) {
                 const parts = r.target_date.split("-");
@@ -64,10 +70,11 @@ export async function sendRemindersMenu(env, chatId, userId, messageId = null) {
                     const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
                     const mIdx = parseInt(parts[1], 10) - 1;
                     const monthStr = monthNames[mIdx] || parts[1];
-                    timeLabel = `\`${monthStr} ${parseInt(parts[2], 10)} • ${r.reminder_time}\``;
+                    const dayLabel = r.target_date === todayStr ? "Today" : `${monthStr} ${parseInt(parts[2], 10)}`;
+                    timeLabel = `\`${dayLabel} • ${r.reminder_time}\``;
                 }
             }
-            const freq = r.target_date ? "Once" : r.frequency === "weekdays" ? "Mon–Fri" : r.frequency === "daily" ? "Daily" : "Once";
+            const freq = isCompleted ? "Completed" : (r.target_date ? "Once" : r.frequency === "weekdays" ? "Mon–Fri" : r.frequency === "daily" ? "Daily" : "Once");
             return `• ${status} ${timeLabel}  ${cleanMd(r.title)} _(${freq})_`;
         }).join("\n");
     }
@@ -90,7 +97,9 @@ export async function sendRemindersMenu(env, chatId, userId, messageId = null) {
     ];
 
     for (const r of customReminders.slice(0, 5)) {
-        const statusIcon = r.is_active ? "🔔" : "🔕";
+        const isPast = r.target_date && r.target_date < todayStr;
+        const isCompleted = isPast && !r.is_active;
+        const statusIcon = isCompleted ? "🏁" : (r.is_active ? "🔔" : "🔕");
         let datePrefix = "";
         if (r.target_date) {
             const parts = r.target_date.split("-");
@@ -98,12 +107,14 @@ export async function sendRemindersMenu(env, chatId, userId, messageId = null) {
                 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
                 const mIdx = parseInt(parts[1], 10) - 1;
                 const monthStr = monthNames[mIdx] || parts[1];
-                datePrefix = `${monthStr} ${parseInt(parts[2], 10)} • `;
+                const dayLabel = r.target_date === todayStr ? "Today" : `${monthStr} ${parseInt(parts[2], 10)}`;
+                datePrefix = `${dayLabel} • `;
             }
         }
-        const cleanTitle = r.title.length > 22 ? r.title.slice(0, 21) + "…" : r.title;
+        const cleanTitle = r.title.length > 20 ? r.title.slice(0, 19) + "…" : r.title;
+        const doneBadge = isCompleted ? " (Done)" : "";
         buttons.push([
-            { text: `${statusIcon} ${datePrefix}${r.reminder_time} ${cleanTitle}`, callback_data: `remind_time_menu:${r.id}` }
+            { text: `${statusIcon} ${datePrefix}${r.reminder_time} ${cleanTitle}${doneBadge}`, callback_data: `remind_time_menu:${r.id}` }
         ]);
     }
 
@@ -223,8 +234,12 @@ export async function sendReminderTimeMenu(env, chatId, userId, reminderId, mess
         return sendRemindersMenu(env, chatId, userId, messageId);
     }
 
-    const freqLabel = r.target_date ? "Once" : r.frequency === "weekdays" ? "Mon–Fri" : r.frequency === "daily" ? "Daily" : "Once";
-    const statusLabel = r.is_active ? "🔔 Active" : "🔕 Paused";
+    const todayStr = today();
+    const isPast = r.target_date && r.target_date < todayStr;
+    const isCompleted = isPast && !r.is_active;
+
+    const freqLabel = isCompleted ? "Completed" : (r.target_date ? "Once" : r.frequency === "weekdays" ? "Mon–Fri" : r.frequency === "daily" ? "Daily" : "Once");
+    const statusLabel = isCompleted ? "🏁 Completed" : (r.is_active ? "🔔 Active" : "🔕 Paused");
     let dateLine = "";
     if (r.target_date) {
         const parts = r.target_date.split("-");
@@ -232,7 +247,8 @@ export async function sendReminderTimeMenu(env, chatId, userId, reminderId, mess
             const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
             const mIdx = parseInt(parts[1], 10) - 1;
             const monthStr = monthNames[mIdx] || parts[1];
-            dateLine = `• *Date:*   \`${monthStr} ${parseInt(parts[2], 10)}\`\n`;
+            const dayLabel = r.target_date === todayStr ? "Today" : `${monthStr} ${parseInt(parts[2], 10)}`;
+            dateLine = `• *Date:*   \`${dayLabel}\`\n`;
         }
     }
 
@@ -243,12 +259,18 @@ export async function sendReminderTimeMenu(env, chatId, userId, reminderId, mess
         `• *Status:* ${statusLabel}`,
         dateLine + `• *Time:*   \`${r.reminder_time}\` _(${freqLabel})_`,
         ``,
-        `_Tap below to toggle or delete:_`
+        isCompleted
+            ? `_This reminder was completed on ${r.target_date}. Tap below to re-arm for today or delete._`
+            : `_Tap below to toggle or delete:_`
     ].join("\n");
+
+    const toggleText = isPast
+        ? "🔔 Re-arm for Today"
+        : (r.is_active ? "🔕 Pause Alert" : "🔔 Turn On");
 
     const buttons = [
         [
-            { text: r.is_active ? "🔕 Pause Alert" : "🔔 Turn On", callback_data: `remind_toggle_inspect:${r.id}` },
+            { text: toggleText, callback_data: `remind_toggle_inspect:${r.id}` },
             { text: "🗑️ Delete", callback_data: `remind_del:${r.id}` }
         ],
         [
