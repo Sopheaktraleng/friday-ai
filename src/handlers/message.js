@@ -1,7 +1,7 @@
 import { today, dateDaysAgo } from "../utils/time.js";
 import { formatAmount, formatMoney, cleanMd, capitalize } from "../utils/format.js";
 import { isUserAuthorized, isUserAuthorizedAsync, isOwner, OWNER_USER_ID } from "../config/constants.js";
-import { telegram, sendMessage, sendTelegramVoice } from "../services/telegram.js";
+import { telegram, sendMessage, sendTelegramVoice, syncBotCommands } from "../services/telegram.js";
 import { generateSpeechAudio, askGeminiWithGoogleSearch } from "../services/ai.js";
 import {
     getDisplayCurrency,
@@ -748,6 +748,29 @@ export async function handleMessage(message, env, origin) {
         return;
     }
 
+    if (text === "/synccommands" || text === "/setcommands") {
+        if (!isOwner(userId, env)) {
+            await sendMessage(
+                env,
+                chatId,
+                `⛔ *Access Denied*\n\nBot command synchronization is restricted to Boss.`,
+                { parse_mode: "Markdown" }
+            );
+            return;
+        }
+        await syncBotCommands(env);
+        await sendMessage(
+            env,
+            chatId,
+            `✅ *Telegram Bot Commands Synchronized*\n\n` +
+            `• *Default & Guests:* 9 commands (excludes /users)\n` +
+            `• *Boss (${userId}):* 10 commands (includes /users)\n\n` +
+            `_Updated successfully across Telegram clients._`,
+            { parse_mode: "Markdown" }
+        );
+        return;
+    }
+
     // 6.1 👥 Dynamic User Access Management (/users, /share, /whitelist)
     if (text === "/users" || text.startsWith("/users ") || text === "/share" || text.startsWith("/share ") || text.startsWith("/whitelist")) {
         if (!isOwner(userId, env)) {
@@ -839,7 +862,7 @@ export async function handleMessage(message, env, origin) {
     }
 
     if (text === "/help" || text === "/h") {
-        await sendHelpMessage(env, chatId);
+        await sendHelpMessage(env, chatId, null, userId);
         return;
     }
 
@@ -925,7 +948,7 @@ export async function handleMessage(message, env, origin) {
         }
 
         if (lower === "help") {
-            await sendHelpMessage(env, chatId);
+            await sendHelpMessage(env, chatId, null, userId);
             return;
         }
 

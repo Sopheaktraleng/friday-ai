@@ -9,10 +9,10 @@ import { ensureTables, resetTablesEnsuredForTest } from "../src/db/schema.js";
 import { handleMessage, handleRealTimeSearchCommand } from "../src/handlers/message.js";
 import worker from "../src/worker.js";
 import { handleCallback } from "../src/handlers/callback.js";
-import { answerCallback } from "../src/services/telegram.js";
+import { answerCallback, syncBotCommands } from "../src/services/telegram.js";
 import { sendRemindersMenu, sendPromptAddReminder, sendReminderTimeMenu, sendFocusMenu } from "../src/modules/reminders/views.js";
 import { parseReminderInput } from "../src/modules/reminders/commands.js";
-import { sendMainHub, sendSettingsMenu } from "../src/modules/hub/views.js";
+import { sendMainHub, sendSettingsMenu, sendHelpMessage } from "../src/modules/hub/views.js";
 import { sendFinanceHub, sendCategoryPicker, sendTransactions } from "../src/modules/finance/views.js";
 import { handleAddWorkLogCommand, handleListTodayTasksCommand } from "../src/modules/work/commands.js";
 
@@ -1556,6 +1556,73 @@ describe("Bot Improvements & Stability", () => {
             expect(bossBody.text).toContain("Boss");
             expect(bossBody.text).toContain("$2.50");
             expect(bossBody.text).toContain("Coffee");
+
+            fetchSpy.mockRestore();
+        });
+    });
+
+    describe("Scoped Bot Commands & Guest UX", () => {
+        it("syncBotCommands should set guest scope without /users and Boss chat scope with /users", async () => {
+            const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+                Promise.resolve(new Response(JSON.stringify({ ok: true, result: true }), { status: 200 }))
+            );
+
+            const mockEnv = {
+                TELEGRAM_BOT_TOKEN: "mock_token",
+                OWNER_ID: "849550186"
+            };
+
+            const res = await syncBotCommands(mockEnv);
+            expect(res.guestCommandsCount).toBe(9);
+            expect(res.bossCommandsCount).toBe(10);
+
+            expect(fetchSpy).toHaveBeenCalledTimes(3);
+
+            // Call 1: Default scope
+            const call1Body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+            expect(call1Body.scope).toEqual({ type: "default" });
+            const defaultCommands = call1Body.commands.map(c => c.command);
+            expect(defaultCommands).not.toContain("users");
+            expect(defaultCommands).toContain("hub");
+            expect(defaultCommands).toContain("settings");
+
+            // Call 2: all_private_chats scope
+            const call2Body = JSON.parse(fetchSpy.mock.calls[1][1].body);
+            expect(call2Body.scope).toEqual({ type: "all_private_chats" });
+            const privateCommands = call2Body.commands.map(c => c.command);
+            expect(privateCommands).not.toContain("users");
+
+            // Call 3: Boss chat scope
+            const call3Body = JSON.parse(fetchSpy.mock.calls[2][1].body);
+            expect(call3Body.scope).toEqual({ type: "chat", chat_id: 849550186 });
+            const bossCommands = call3Body.commands.map(c => c.command);
+            expect(bossCommands).toContain("users");
+
+            fetchSpy.mockRestore();
+        });
+
+        it("sendHelpMessage should hide /users from guest users and show it to Boss", async () => {
+            const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+                Promise.resolve(new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }))
+            );
+
+            const mockEnv = {
+                TELEGRAM_BOT_TOKEN: "mock_token",
+                OWNER_ID: "849550186"
+            };
+
+            // 1. Guest user
+            await sendHelpMessage(mockEnv, 999888777, null, 999888777);
+            const guestBody = JSON.parse(fetchSpy.mock.calls[0][1].body);
+            expect(guestBody.text).not.toContain("/users");
+            expect(guestBody.text).toContain("/today");
+            expect(guestBody.text).toContain("/search");
+
+            // 2. Boss user
+            await sendHelpMessage(mockEnv, 849550186, null, 849550186);
+            const bossBody = JSON.parse(fetchSpy.mock.calls[1][1].body);
+            expect(bossBody.text).toContain("/users");
+            expect(bossBody.text).toContain("Dynamic user access matrix");
 
             fetchSpy.mockRestore();
         });

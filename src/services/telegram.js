@@ -166,3 +166,60 @@ export async function sendChatAction(env, chatId, action = "typing") {
         return null;
     }
 }
+
+/**
+ * Synchronize Telegram Bot Commands with role-based scoping:
+ * - Default / All Private Chats scope: guests only see public commands (excludes /users)
+ * - Boss chat scope: includes admin commands (/users)
+ */
+export async function syncBotCommands(env) {
+    const ownerId = String(env?.OWNER_ID || env?.OWNER_TELEGRAM_ID || "849550186").trim();
+
+    const guestCommands = [
+        { command: "hub", description: "🏠 Open Command Center" },
+        { command: "search", description: "🌐 Live Google Search Grounding" },
+        { command: "today", description: "📊 Today Expenses & Balance" },
+        { command: "summary", description: "💳 Monthly Spending Summary" },
+        { command: "tasks", description: "📋 Today Completed Tasks" },
+        { command: "briefing", description: "🛡️ Morning Briefing & Status" },
+        { command: "voice", description: "🎙️ Voice Modes & Settings" },
+        { command: "settings", description: "⚙️ Currency & Budget Settings" },
+        { command: "help", description: "💡 Quick Guide & Shortcuts" }
+    ];
+
+    const bossCommands = [
+        { command: "hub", description: "🏠 Open Command Center" },
+        { command: "users", description: "👥 Manage Guests & Approvals" },
+        { command: "search", description: "🌐 Live Google Search Grounding" },
+        { command: "today", description: "📊 Today Expenses & Balance" },
+        { command: "summary", description: "💳 Monthly Spending Summary" },
+        { command: "tasks", description: "📋 Today Completed Tasks" },
+        { command: "briefing", description: "🛡️ Morning Briefing & Status" },
+        { command: "voice", description: "🎙️ Voice Modes & Settings" },
+        { command: "settings", description: "⚙️ Currency & Budget Settings" },
+        { command: "help", description: "💡 Quick Guide & Shortcuts" }
+    ];
+
+    await telegram(env, "setMyCommands", {
+        commands: guestCommands,
+        scope: { type: "default" }
+    });
+
+    await telegram(env, "setMyCommands", {
+        commands: guestCommands,
+        scope: { type: "all_private_chats" }
+    });
+
+    if (ownerId) {
+        await telegram(env, "setMyCommands", {
+            commands: bossCommands,
+            scope: { type: "chat", chat_id: Number(ownerId) || ownerId }
+        });
+    }
+
+    return {
+        guestCommandsCount: guestCommands.length,
+        bossCommandsCount: bossCommands.length,
+        ownerId
+    };
+}

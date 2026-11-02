@@ -9,6 +9,7 @@
         "deploy": "wrangler deploy",
         "db:migrate:local": "wrangler d1 execute cashflow_bot --local --file=./schema.sql",
         "db:migrate:remote": "wrangler d1 execute cashflow_bot --remote --file=./schema.sql",
+        "set:commands": "node scripts/set-commands.js",
         "set:webhook": "node scripts/set-webhook.js",
         "test": "vitest run",
         "test:watch": "vitest"

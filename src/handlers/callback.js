@@ -345,7 +345,7 @@ export async function handleCallback(callback, env, origin) {
     }
 
     if (data === "help") {
-        await sendHelpMessage(env, chatId, messageId);
+        await sendHelpMessage(env, chatId, messageId, userId);
         return;
     }
 

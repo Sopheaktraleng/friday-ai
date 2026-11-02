@@ -8,7 +8,7 @@ import { handleCallback } from "./handlers/callback.js";
 import { processDueReminders } from "./modules/reminders/cron.js";
 import { sendWeeklyScheduledReports } from "./modules/finance/views.js";
 import { sendDailyScheduledBriefings } from "./modules/copilot/briefing.js";
-import { sendMessage, answerCallback } from "./services/telegram.js";
+import { sendMessage, answerCallback, syncBotCommands } from "./services/telegram.js";
 import { isUserAuthorizedAsync } from "./config/constants.js";
 
 /**
@@ -144,6 +144,15 @@ export default {
 
         // 4. Healthcheck endpoint
         if (request.method === "GET") {
+            if (url.pathname === "/init-commands" || url.pathname === "/set-commands") {
+                const secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token") || url.searchParams.get("secret");
+                if (env.WEBHOOK_SECRET && (!secret || !timingSafeEqual(secret, env.WEBHOOK_SECRET.trim()))) {
+                    return json({ ok: false, error: "Unauthorized" }, 401);
+                }
+                const res = await syncBotCommands(env);
+                return json({ ok: true, result: res });
+            }
+
             return json({ ok: true, service: "cashflow-bot" });
         }
 

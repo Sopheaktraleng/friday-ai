@@ -231,7 +231,29 @@ export async function sendUserManagementMenu(env, chatId, userId, messageId = nu
     });
 }
 
-export async function sendHelpMessage(env, chatId, messageId = null) {
+export async function sendHelpMessage(env, chatId, messageId = null, userId = null) {
+    const effectiveUserId = userId || chatId;
+    const isBoss = isOwner(effectiveUserId, env);
+
+    const assistantFeatures = [
+        `🤖 *F.R.I.D.A.Y. Tactical Assistant*`,
+        `• \`/search <query>\` — Live Google Search grounding (weather, crypto, news, scores)`
+    ];
+
+    if (isBoss) {
+        assistantFeatures.push(`• \`/users\` — Dynamic user access matrix & guest approval (Boss only)`);
+    }
+
+    assistantFeatures.push(
+        `• \`/briefing\` or \`/friday\` — Tactical morning/status briefing`,
+        `• \`/remember <fact>\` — Teach Friday personal preferences & habits`,
+        `• \`/memory\` — Inspect Friday's long-term memory matrix`,
+        `• \`/reset\` — Clear active multi-turn conversation context`,
+        `• *Two-Way Voice:* Send a voice note, Friday speaks back!`,
+        `• *Vision & Error Debugger:* Send code screenshots or error photos`,
+        `• \`/ask <question>\` — e.g. _"Friday, can I afford a $60 dinner?"_`
+    );
+
     const text = [
         `💡 *Help & Shortcuts Guide*`,
         ``,
@@ -255,16 +277,7 @@ export async function sendHelpMessage(env, chatId, messageId = null) {
         `• \`/summary\` — Monthly spending breakdown & analytics`,
         `• \`/settings\` — Currency toggle (USD / KHR) & monthly budget`,
         ``,
-        `🤖 *F.R.I.D.A.Y. Tactical Assistant*`,
-        `• \`/search <query>\` — Live Google Search grounding (weather, crypto, news, scores)`,
-        `• \`/users\` — Dynamic user access matrix & guest approval (Boss only)`,
-        `• \`/briefing\` or \`/friday\` — Tactical morning/status briefing`,
-        `• \`/remember <fact>\` — Teach Friday personal preferences & habits`,
-        `• \`/memory\` — Inspect Friday's long-term memory matrix`,
-        `• \`/reset\` — Clear active multi-turn conversation context`,
-        `• *Two-Way Voice:* Send a voice note, Friday speaks back!`,
-        `• *Vision & Error Debugger:* Send code screenshots or error photos`,
-        `• \`/ask <question>\` — e.g. _"Friday, can I afford a $60 dinner?"_`,
+        ...assistantFeatures,
         ``,
         `_Tap any button below to jump directly to that workspace:_`
     ].join("\n");
