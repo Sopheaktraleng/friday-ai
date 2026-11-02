@@ -470,22 +470,21 @@ export async function handleAiCopilotQuery(env, chatId, userId, query, from, mes
             saveChatMessage(env.DB, userId, "model", result.reply).catch(() => {});
         }
 
-        // If voice mode is active (or input was voice/speak), send audio transmission.
-        // Telegram's native voice player handles playback cleanly, so no button clutter is needed!
+        // If voice mode is active (or input was voice/speak), deliver text instantly, then send audio transmission
         if (shouldVoice) {
+            // Deliver text response immediately so user reads reply with zero latency
+            await sendMessage(env, chatId, result.reply, { parse_mode: "Markdown" });
+
             try {
                 const spokenText = result.voice_summary || result.reply;
                 const audioBuffer = await generateSpeechAudio(spokenText);
                 if (audioBuffer) {
-                    await Promise.all([
-                        sendTelegramVoice(env, chatId, audioBuffer, "🎙️ F.R.I.D.A.Y. Transmission"),
-                        sendMessage(env, chatId, result.reply, { parse_mode: "Markdown" })
-                    ]);
-                    return;
+                    await sendTelegramVoice(env, chatId, audioBuffer, "🎙️ F.R.I.D.A.Y. Transmission");
                 }
             } catch (voiceErr) {
                 console.warn("Spoken reply generation failed, falling back to text:", voiceErr.message);
             }
+            return;
         }
 
         // Clean conversational response without repetitive navigation buttons.

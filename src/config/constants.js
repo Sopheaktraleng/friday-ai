@@ -6,11 +6,11 @@ export const EXCHANGE_RATE = 4000; // 1 USD = 4000 KHR
 export const GEMINI_MODELS = [
     "gemini-3.5-flash",         // Standard high intelligence
     "gemini-flash-lite-latest", // High quota availability on free tier
+    "gemini-3.5-flash-lite",    // Ultra-low latency speed fallback
+    "gemini-flash-latest",      // Production latest alias
+    "gemini-3.8-flash",         // Flagship reasoning
     "gemini-3.6-flash",         // Next-gen flash
-    "gemini-3.1-flash-lite",    // Lite fallback
-    "gemini-3.8-flash",         // Flagship flash
-    "gemini-3.5-flash-lite",    // Lite speed fallback
-    "gemini-flash-latest"       // Latest alias
+    "gemini-3.1-flash-lite"     // Lite fallback
 ];
 
 export const QUICK_EXPENSE_CATS = [

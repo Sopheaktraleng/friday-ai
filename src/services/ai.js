@@ -481,6 +481,20 @@ export async function buildAiUserContext(db, userId, userQuery = null) {
     const spentMonthKhr = monthSummary?.totalExpenseInKhr || 0;
     const remainingBudgetKhr = budgetKhr > 0 ? (budgetKhr - spentMonthKhr) : null;
 
+    // Smart financial runway & daily burn rate telemetry
+    const year = parseInt(curDate.slice(0, 4), 10);
+    const monthNum = parseInt(curDate.slice(5, 7), 10);
+    const dayOfMonth = parseInt(curDate.slice(8, 10), 10);
+    const daysInCurrentMonth = new Date(year, monthNum, 0).getDate();
+    const daysRemainingInMonth = Math.max(1, daysInCurrentMonth - dayOfMonth + 1);
+
+    const safeDailyLimitUsd = remainingBudgetKhr !== null && remainingBudgetKhr > 0
+        ? Number(((remainingBudgetKhr / EXCHANGE_RATE) / daysRemainingInMonth).toFixed(2))
+        : 0;
+    const safeDailyLimitKhr = remainingBudgetKhr !== null && remainingBudgetKhr > 0
+        ? Math.round(remainingBudgetKhr / daysRemainingInMonth)
+        : 0;
+
     return {
         currentDate: curDate,
         currentTime: curTime,
@@ -493,7 +507,12 @@ export async function buildAiUserContext(db, userId, userQuery = null) {
             spentKhr: spentMonthKhr,
             remainingUsd: Number(((budgetKhr - spentMonthKhr) / EXCHANGE_RATE).toFixed(2)),
             remainingKhr: remainingBudgetKhr,
-            percentUsed: Math.round((spentMonthKhr / budgetKhr) * 100)
+            percentUsed: Math.round((spentMonthKhr / budgetKhr) * 100),
+            daysRemainingInMonth,
+            daysPassedInMonth: dayOfMonth,
+            totalDaysInMonth: daysInCurrentMonth,
+            safeDailyLimitUsd,
+            safeDailyLimitKhr
         } : null,
         totals: {
             allTimeNetBalanceUsd: Number(((allSummary?.balanceKhr || 0) / EXCHANGE_RATE).toFixed(2)),
@@ -632,8 +651,13 @@ Core Operating Directives (CRITICAL):
      * STRICTLY AVOID referencing Marvel, Iron Man, Tony Stark, Ultron, arc reactors, superhero suits, or comic/movie lore. Speak as an elite real-world executive chief of staff.
    - Casual Chit-Chat:
      * If ${userLabel} says "hi", "how are you", "say anything", tells a joke, or makes small talk: respond with wit, warmth, and charm in 1-2 friendly human sentences. Never dump an unprompted status report. ${!isOwner ? "Do NOT call them Boss." : ""}
-2. Financial Defense & System Execution:
-   - When asked "Can I afford X?", calculate exact remaining discretionary funds and runway from telemetry. Give direct, realistic, grounded financial advice in 1-2 concise sentences.
+2. Financial Defense & Strategic Runway Advisory:
+   - When asked "Can I afford X?" or about spending room / runway:
+     * Cross-reference telemetry.budget (remainingUsd, safeDailyLimitUsd, daysRemainingInMonth) and telemetry.totals.
+     * Calculate post-purchase safe daily limit: (remainingUsd - cost) / daysRemainingInMonth.
+     * If affordable: Give clear, encouraging green-light advice with exact remaining daily room (e.g. "Yes Boss, comfortably. Spending $30 leaves you with $210 for 14 days, or $15/day safe burn rate.").
+     * If tight or exceeding daily allowance: Give tactical caution (e.g. "It's technically doable, but buying this at $90 drops your safe daily allowance from $25/day to $12/day for the remaining 10 days.").
+     * If over budget: State clearly that monthly discretionary runway is exhausted and advise pausing until next month.
    - When asked to record an expense, income, work task, reminder, or configure system settings, return the appropriate "action" or "actions" array, and confirm in ONE short sentence.
    - AUTONOMOUS MULTI-ACTION EXECUTION (TOP PRIORITY):
      ${userLabel} may issue complex multi-intent commands combining multiple requests in one breath (via voice notes or text).
@@ -1032,7 +1056,6 @@ export async function askAiCopilot(env, userQuery, context) {
         // Prioritize ultra-fast flash-lite models for sub-second conversational latency
         const candidateModels = Array.from(new Set([
             env?.GEMINI_MODEL,
-            "gemini-flash-lite-latest",
             ...GEMINI_MODELS
         ].filter(Boolean).filter(m => m !== "gemini-3-flash-preview")));
 
@@ -1047,7 +1070,7 @@ export async function askAiCopilot(env, userQuery, context) {
                 const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`;
                 
                 const modelGenConfig = { temperature };
-                if (model.includes("flash") || model.includes("2.5") || model.includes("3.")) {
+                if (model.includes("thinking")) {
                     modelGenConfig.thinkingConfig = { thinkingBudget: 0 };
                 }
 
@@ -1068,7 +1091,7 @@ export async function askAiCopilot(env, userQuery, context) {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: requestBody,
-                    signal: AbortSignal.timeout(12000)
+                    signal: AbortSignal.timeout(7000)
                 });
 
                 // Fallback to monolithic prompt if model rejects tools or system_instruction
@@ -1145,7 +1168,7 @@ export async function askAiCopilot(env, userQuery, context) {
                                     contents: followUpContents,
                                     generationConfig: { temperature: 0.3 }
                                 }),
-                                signal: AbortSignal.timeout(8000)
+                                signal: AbortSignal.timeout(6000)
                             });
 
                             if (followUpResp.ok) {

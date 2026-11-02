@@ -258,6 +258,29 @@ describe("Core AI & Agentic Intelligence Adjustments", () => {
             expect(callCount).toBe(2); // Initial tool call + follow-up synthesis turn
             expect(result.reply).toContain("$4.50");
         });
+
+        it("buildAiUserContext should compute smart runway and safe daily limit", async () => {
+            const mockDb = {
+                prepare: vi.fn().mockImplementation((query) => ({
+                    bind: vi.fn().mockImplementation(() => ({
+                        first: vi.fn().mockImplementation(async () => {
+                            if (query.includes("monthly_budget")) {
+                                return { monthly_budget: 800000 }; // 200 USD
+                            }
+                            return null;
+                        }),
+                        all: vi.fn().mockResolvedValue({ results: [] })
+                    })),
+                    all: vi.fn().mockResolvedValue([])
+                }))
+            };
+
+            const ctx = await buildAiUserContext(mockDb, "user_boss", "Can I afford a new monitor?");
+            expect(ctx.budget).toBeDefined();
+            expect(ctx.budget.limitUsd).toBe(200);
+            expect(ctx.budget.daysRemainingInMonth).toBeGreaterThan(0);
+            expect(ctx.budget.safeDailyLimitUsd).toBeGreaterThan(0);
+        });
     });
 
     describe("2. Semantic RAG & Historical Search (D1 FTS5 & Search)", () => {
