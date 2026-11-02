@@ -1438,10 +1438,10 @@ describe("Bot Improvements & Stability", () => {
             expect(body.text).not.toContain("Income:");
             expect(body.text).not.toContain("in the red");
 
-            // Buttons: Pure minimalist 3x2 grid (no undo button in UI)
+            // Buttons: Pure minimalist 2x2 grid (no manual +Expense/+Income buttons)
             const buttons = body.reply_markup.inline_keyboard.flat();
-            expect(buttons.some(b => b.text === "🧾 + Expense")).toBe(true);
-            expect(buttons.some(b => b.text === "💰 + Income")).toBe(true);
+            expect(buttons.some(b => b.text === "🧾 + Expense")).toBe(false);
+            expect(buttons.some(b => b.text === "💰 + Income")).toBe(false);
             expect(buttons.some(b => b.text === "📊 Month Insights")).toBe(true);
             expect(buttons.some(b => b.text === "📜 History")).toBe(true);
             expect(buttons.some(b => b.text === "‹ Back to Finance")).toBe(true);

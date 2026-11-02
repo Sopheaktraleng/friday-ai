@@ -297,17 +297,11 @@ export async function sendTransactions(env, chatId, userId, messageId = null) {
             `📋 *Today's Ledger*`,
             `📅 \`${cambodiaDate} • Phnom Penh\``,
             ``,
-            `_No transactions recorded today yet._`,
-            ``,
-            `_Tap below to log your first transaction today!_`
+            `_No transactions recorded today yet._`
         ].join("\n"), {
             parse_mode: "Markdown",
             reply_markup: {
                 inline_keyboard: [
-                    [
-                        { text: "🧾 + Expense", callback_data: "add_expense" },
-                        { text: "💰 + Income", callback_data: "add_income" }
-                    ],
                     [
                         { text: "📊 Month Insights", callback_data: "summary_month" },
                         { text: "📜 History", callback_data: "history:1" }
@@ -387,10 +381,6 @@ export async function sendTransactions(env, chatId, userId, messageId = null) {
     ].join("\n");
 
     const keyboard = [
-        [
-            { text: "🧾 + Expense", callback_data: "add_expense" },
-            { text: "💰 + Income", callback_data: "add_income" }
-        ],
         [
             { text: "📊 Month Insights", callback_data: "summary_month" },
             { text: "📜 History", callback_data: "history:1" }
