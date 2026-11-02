@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { authenticateApiRequest } from "../src/handlers/api.js";
+import { describe, it, expect, vi } from "vitest";
+import { authenticateApiRequest, handleApiRequest } from "../src/handlers/api.js";
 
 describe("API Authentication Handler", () => {
     it("should allow localhost dev bypass when user_id is provided", async () => {
@@ -44,5 +44,84 @@ describe("API Authentication Handler", () => {
         const auth = await authenticateApiRequest(req, env);
         expect(auth.error).toBe("Invalid or expired Telegram WebApp session");
         expect(auth.status).toBe(401);
+    });
+
+    describe("API Feature Permissions Enforcement", () => {
+        const createMockDb = (permissions = "finance") => ({
+            prepare: vi.fn().mockImplementation((query) => ({
+                bind: vi.fn().mockImplementation(() => ({
+                    first: vi.fn().mockImplementation(async () => {
+                        if (query.includes("FROM authorized_users")) {
+                            return {
+                                user_id: "777888",
+                                permissions
+                            };
+                        }
+                        if (query.includes("COUNT(*) as count")) {
+                            return { count: 0 };
+                        }
+                        return null;
+                    }),
+                    all: vi.fn().mockResolvedValue({ results: [] }),
+                    run: vi.fn().mockResolvedValue({ meta: { changes: 1 } })
+                }))
+            }))
+        });
+
+        it("/api/data should return permissions and omit activeReminder when reminders is disabled", async () => {
+            const req = new Request("http://localhost:8787/api/data?user_id=777888", {
+                headers: { host: "localhost:8787" }
+            });
+            const env = {
+                TELEGRAM_BOT_TOKEN: "mock_token",
+                OWNER_ID: "849550186",
+                ALLOWED_USER_IDS: "849550186,777888",
+                DB: createMockDb("finance") // ONLY finance
+            };
+
+            const resp = await handleApiRequest(req, env);
+            expect(resp.status).toBe(200);
+            const data = await resp.json();
+            expect(data.permissions).toEqual({
+                finance: true,
+                tasks: false,
+                reminders: false
+            });
+            expect(data.activeReminder).toBeNull();
+        });
+
+        it("/api/reminders should return 403 Forbidden when reminders is disabled", async () => {
+            const req = new Request("http://localhost:8787/api/reminders?user_id=777888", {
+                headers: { host: "localhost:8787" }
+            });
+            const env = {
+                TELEGRAM_BOT_TOKEN: "mock_token",
+                OWNER_ID: "849550186",
+                ALLOWED_USER_IDS: "849550186,777888",
+                DB: createMockDb("finance")
+            };
+
+            const resp = await handleApiRequest(req, env);
+            expect(resp.status).toBe(403);
+            const data = await resp.json();
+            expect(data.error).toContain("Forbidden: Reminders module disabled");
+        });
+
+        it("/api/work should return 403 Forbidden when tasks is disabled", async () => {
+            const req = new Request("http://localhost:8787/api/work?user_id=777888", {
+                headers: { host: "localhost:8787" }
+            });
+            const env = {
+                TELEGRAM_BOT_TOKEN: "mock_token",
+                OWNER_ID: "849550186",
+                ALLOWED_USER_IDS: "849550186,777888",
+                DB: createMockDb("finance")
+            };
+
+            const resp = await handleApiRequest(req, env);
+            expect(resp.status).toBe(403);
+            const data = await resp.json();
+            expect(data.error).toContain("Forbidden: Work & Tasks module disabled");
+        });
     });
 });

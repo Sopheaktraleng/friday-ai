@@ -11,7 +11,21 @@ export async function sendMainHub(env, chatId, userId, from, origin, messageId =
     const cleanUsername = rawUsername.replace(/[_*`[\]]/g, " ").trim() || "Friend";
     const monthStr = monthPrefix();
 
-    // Fetch all hub data concurrently in parallel roundtrip
+    const isUserOwner = isOwner(userId, env);
+    const userTitle = isUserOwner ? "Boss" : cleanUsername;
+
+    let guestUser = null;
+    let permissionsStr = DEFAULT_GUEST_PERMISSIONS;
+    if (!isUserOwner && env.DB) {
+        guestUser = await getAuthorizedUser(env.DB, userId);
+        permissionsStr = guestUser?.permissions || DEFAULT_GUEST_PERMISSIONS;
+    }
+
+    const hasFinance = isUserOwner || hasUserPermission("finance", permissionsStr, isUserOwner);
+    const hasTasks = isUserOwner || hasUserPermission("tasks", permissionsStr, isUserOwner);
+    const hasReminders = isUserOwner || hasUserPermission("reminders", permissionsStr, isUserOwner);
+
+    // Fetch only permitted hub data concurrently in parallel roundtrip
     const [
         displayCurrency,
         todaySummary,
@@ -20,25 +34,18 @@ export async function sendMainHub(env, chatId, userId, from, origin, messageId =
         allReminders
     ] = await Promise.all([
         getDisplayCurrency(env.DB, userId),
-        getFinancialSummary(env.DB, userId, "today"),
-        getFinancialSummary(env.DB, userId, "all"),
-        env.DB.prepare("SELECT COUNT(*) as count FROM work_logs WHERE user_id = ? AND date LIKE ?").bind(userId, `${monthStr}%`).first(),
-        env.DB.prepare("SELECT id, title, reminder_time, is_active FROM reminders WHERE user_id = ? ORDER BY id ASC").bind(userId).all()
+        hasFinance ? getFinancialSummary(env.DB, userId, "today") : Promise.resolve(null),
+        hasFinance ? getFinancialSummary(env.DB, userId, "all") : Promise.resolve(null),
+        (hasTasks && env.DB?.prepare) ? env.DB.prepare("SELECT COUNT(*) as count FROM work_logs WHERE user_id = ? AND date LIKE ?").bind(userId, `${monthStr}%`).first() : Promise.resolve(null),
+        (hasReminders && env.DB?.prepare) ? env.DB.prepare("SELECT id, title, reminder_time, is_active FROM reminders WHERE user_id = ? ORDER BY id ASC").bind(userId).all() : Promise.resolve(null)
     ]);
 
     const workCount = workRow?.count || 0;
     const remList = allReminders?.results || [];
     const activeRems = remList.filter(r => r.is_active);
-    let remLine = "_No active reminders_";
-    if (activeRems.length > 0) {
-        const first = activeRems[0];
-        const shortTitle = first.title.length > 20 ? first.title.slice(0, 19) + "…" : first.title;
-        remLine = `\`${activeRems.length} active\` _(${first.reminder_time} ${shortTitle})_`;
-    }
 
     const netBalance = allSummary?.balanceKhr || 0;
     const isNegative = netBalance < 0;
-    const balanceIndicator = isNegative ? "🔴" : "🟢";
     const balanceStr = formatAmount(netBalance, displayCurrency);
     const todayStr = formatAmount(todaySummary?.totalExpenseInKhr || 0, displayCurrency);
 
@@ -51,9 +58,6 @@ export async function sendMainHub(env, chatId, userId, from, origin, messageId =
         }).format(now),
         10
     );
-
-    const isUserOwner = isOwner(userId, env);
-    const userTitle = isUserOwner ? "Boss" : cleanUsername;
 
     let quote = `Everything is running smoothly on my end, ${userTitle}.`;
     if (ppHour >= 5 && ppHour < 12) {
@@ -72,28 +76,29 @@ export async function sendMainHub(env, chatId, userId, from, origin, messageId =
         ? `\`${activeRems.length} active\` _(${activeRems[0].reminder_time} ${activeRems[0].title.slice(0, 20)})_`
         : `_All clear_`;
 
-    const text = [
+    const textLines = [
         `⚡ *F.R.I.D.A.Y.*`,
-        `*"${quote}"*`,
-        ``,
-        `💳 *Ledger:* \`${sign}${balanceStr}\` _(${balanceColorNote})_`,
-        `💸 *Spent Today:* \`${todayStr}\``,
-        `📋 *Work Done:* \`${workCount} tasks\` _(${monthLabel()})_`,
-        `⏰ *Alarms:* ${agendaLine}`,
-        ``,
-        `_Standing by whenever you're ready._`
-    ].join("\n");
+        `*"${quote}"*`
+    ];
 
-    let guestUser = null;
-    let permissionsStr = DEFAULT_GUEST_PERMISSIONS;
-    if (!isUserOwner) {
-        guestUser = await getAuthorizedUser(env.DB, userId);
-        permissionsStr = guestUser?.permissions || DEFAULT_GUEST_PERMISSIONS;
+    const metricLines = [];
+    if (hasFinance) {
+        metricLines.push(`💳 *Ledger:* \`${sign}${balanceStr}\` _(${balanceColorNote})_`);
+        metricLines.push(`💸 *Spent Today:* \`${todayStr}\``);
+    }
+    if (hasTasks) {
+        metricLines.push(`📋 *Work Done:* \`${workCount} tasks\` _(${monthLabel()})_`);
+    }
+    if (hasReminders) {
+        metricLines.push(`⏰ *Alarms:* ${agendaLine}`);
     }
 
-    const hasFinance = isUserOwner || hasUserPermission("finance", permissionsStr, isUserOwner);
-    const hasTasks = isUserOwner || hasUserPermission("tasks", permissionsStr, isUserOwner);
-    const hasReminders = isUserOwner || hasUserPermission("reminders", permissionsStr, isUserOwner);
+    if (metricLines.length > 0) {
+        textLines.push(``, ...metricLines);
+    }
+
+    textLines.push(``, `_Standing by whenever you're ready._`);
+    const text = textLines.join("\n");
 
     const hubButtons = [];
     const row1 = [];
@@ -314,65 +319,125 @@ export async function sendHelpMessage(env, chatId, messageId = null, userId = nu
     const effectiveUserId = userId || chatId;
     const isBoss = isOwner(effectiveUserId, env);
 
-    const assistantFeatures = [
-        `🤖 *F.R.I.D.A.Y. Tactical Assistant*`,
-        `• \`/search <query>\` — Live Google Search grounding (weather, crypto, news, scores)`
-    ];
-
-    if (isBoss) {
-        assistantFeatures.push(`• \`/users\` — Dynamic user access matrix & guest approval (Boss only)`);
+    let guestUser = null;
+    let permissionsStr = DEFAULT_GUEST_PERMISSIONS;
+    if (!isBoss && env.DB) {
+        guestUser = await getAuthorizedUser(env.DB, effectiveUserId);
+        permissionsStr = guestUser?.permissions || DEFAULT_GUEST_PERMISSIONS;
     }
 
-    assistantFeatures.push(
-        `• \`/remember <fact>\` — Teach Friday personal preferences & habits`,
-        `• \`/memory\` — Inspect Friday's long-term memory matrix`,
-        `• \`/reset\` — Clear active multi-turn conversation context`,
-        `• *Two-Way Voice:* Send a voice note, Friday speaks back!`,
-        `• *Vision & Error Debugger:* Send code screenshots or error photos`,
-        `• \`/ask <question>\` — e.g. _"Friday, can I afford a $60 dinner?"_`
-    );
+    const hasFinance = isBoss || hasUserPermission("finance", permissionsStr, isBoss);
+    const hasTasks = isBoss || hasUserPermission("tasks", permissionsStr, isBoss);
+    const hasReminders = isBoss || hasUserPermission("reminders", permissionsStr, isBoss);
+    const hasAiDialog = isBoss || hasUserPermission("ai_dialog", permissionsStr, isBoss);
 
-    const text = [
+    const assistantFeatures = [];
+    if (hasAiDialog) {
+        assistantFeatures.push(
+            `🤖 *F.R.I.D.A.Y. Tactical Assistant*`,
+            `• \`/search <query>\` — Live Google Search grounding (weather, crypto, news, scores)`
+        );
+        if (isBoss) {
+            assistantFeatures.push(`• \`/users\` — Dynamic user access matrix & guest approval (Boss only)`);
+        }
+        assistantFeatures.push(
+            `• \`/remember <fact>\` — Teach Friday personal preferences & habits`,
+            `• \`/memory\` — Inspect Friday's long-term memory matrix`,
+            `• \`/reset\` — Clear active multi-turn conversation context`,
+            `• *Two-Way Voice:* Send a voice note, Friday speaks back!`,
+            `• *Vision & Error Debugger:* Send code screenshots or error photos`,
+            `• \`/ask <question>\` — e.g. _"Friday, can I afford a $60 dinner?"_`
+        );
+    }
+
+    const sections = [
         `💡 *Help & Shortcuts Guide*`,
-        ``,
-        `⚡ *Fast Natural Logging (No Commands Needed)*`,
-        `• *Expense:* \`5 coffee\` or \`12000 lunch\` or \`3.50 grab\``,
-        `• *Income:* \`+500 salary\`, \`40$ income\`, or \`earned $50 freelance\``,
-        `• *Work Task:* \`done Fixed payment timeout bug\``,
-        `• *Reminder:* \`remind 17:30 Daily sync\` or \`remind in 25m Review PR\``,
-        `• *Undo Mistake:* \`/undo\` or type \`undo\` to remove the last entry`,
-        ``,
-        `🎙️ *Hands-Free Voice & Slip Scanner*`,
-        `• *Voice Note:* Hold 🎙️ and speak in English or Khmer (*អក្សរខ្មែរ*)`,
-        `• *Receipt OCR:* Send ABA Bank, Bakong, KHQR, or receipt photos`,
-        ``,
-        `💼 *Work & Task Logging*`,
-        `• \`done <task>\` — Log completed task (e.g. \`done Fixed login issue\`)`,
-        `• \`/tasks\` — View today's completed accomplishments`,
-        ``,
-        `💳 *Finance & Cashflow*`,
-        `• \`/today\` — Today's transactions & balance`,
-        `• \`/summary\` — Monthly spending breakdown & analytics`,
-        `• \`/settings\` — Currency toggle (USD / KHR) & monthly budget`,
-        ``,
-        ...assistantFeatures,
-        ``,
-        `_Tap any button below to jump directly to that workspace:_`
-    ].join("\n");
+        ``
+    ];
+
+    const fastShortcuts = [];
+    if (hasFinance) {
+        fastShortcuts.push(
+            `• *Expense:* \`5 coffee\` or \`12000 lunch\` or \`3.50 grab\``,
+            `• *Income:* \`+500 salary\`, \`40$ income\`, or \`earned $50 freelance\``
+        );
+    }
+    if (hasTasks) {
+        fastShortcuts.push(`• *Work Task:* \`done Fixed payment timeout bug\``);
+    }
+    if (hasReminders) {
+        fastShortcuts.push(`• *Reminder:* \`remind 17:30 Daily sync\` or \`remind in 25m Review PR\``);
+    }
+    if (hasFinance || hasTasks) {
+        fastShortcuts.push(`• *Undo Mistake:* \`/undo\` or type \`undo\` to remove the last entry`);
+    }
+
+    if (fastShortcuts.length > 0) {
+        sections.push(
+            `⚡ *Fast Natural Logging (No Commands Needed)*`,
+            ...fastShortcuts,
+            ``
+        );
+    }
+
+    if (hasAiDialog || hasFinance) {
+        const voiceAndScan = [];
+        if (hasAiDialog) voiceAndScan.push(`• *Voice Note:* Hold 🎙️ and speak in English or Khmer (*អក្សរខ្មែរ*)`);
+        if (hasFinance) voiceAndScan.push(`• *Receipt OCR:* Send ABA Bank, Bakong, KHQR, or receipt photos`);
+        sections.push(
+            `🎙️ *Hands-Free Voice & Slip Scanner*`,
+            ...voiceAndScan,
+            ``
+        );
+    }
+
+    if (hasTasks) {
+        sections.push(
+            `💼 *Work & Task Logging*`,
+            `• \`done <task>\` — Log completed task (e.g. \`done Fixed login issue\`)`,
+            `• \`/tasks\` — View today's completed accomplishments`,
+            ``
+        );
+    }
+
+    if (hasFinance) {
+        sections.push(
+            `💳 *Finance & Cashflow*`,
+            `• \`/today\` — Today's transactions & balance`,
+            `• \`/summary\` — Monthly spending breakdown & analytics`,
+            `• \`/settings\` — Currency toggle (USD / KHR) & monthly budget`,
+            ``
+        );
+    }
+
+    if (assistantFeatures.length > 0) {
+        sections.push(...assistantFeatures, ``);
+    }
+
+    sections.push(`_Tap any button below to jump directly to that workspace:_`);
+    const text = sections.join("\n");
+
+    const helpButtons = [];
+    const row1 = [];
+    if (hasFinance) {
+        row1.push({ text: "💳 Finance Hub", callback_data: "finance_hub" });
+    }
+    if (hasTasks) {
+        row1.push({ text: "📋 Today's Tasks", callback_data: "tasks_today" });
+    }
+    if (row1.length > 0) helpButtons.push(row1);
+
+    const row2 = [];
+    if (hasReminders) {
+        row2.push({ text: "⏰ Reminders", callback_data: "reminders" });
+    }
+    row2.push({ text: "🏠 Main Hub", callback_data: "hub" });
+    helpButtons.push(row2);
 
     await safeEditOrSendMessage(env, chatId, messageId, text, {
         parse_mode: "Markdown",
         reply_markup: {
-            inline_keyboard: [
-                [
-                    { text: "💳 Finance Hub", callback_data: "finance_hub" },
-                    { text: "📋 Today's Tasks", callback_data: "tasks_today" }
-                ],
-                [
-                    { text: "⏰ Reminders", callback_data: "reminders" },
-                    { text: "🏠 Main Hub", callback_data: "hub" }
-                ]
-            ]
+            inline_keyboard: helpButtons
         }
     });
 }

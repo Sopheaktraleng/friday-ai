@@ -1988,5 +1988,145 @@ describe("Bot Improvements & Stability", () => {
 
             fetchSpy.mockRestore();
         });
+
+        it("sendMainHub should hide Alarms from dashboard text and buttons when reminders feature is disabled", async () => {
+            const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+                Promise.resolve(new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }))
+            );
+
+            const mockDb = {
+                batch: vi.fn().mockResolvedValue([]),
+                prepare: vi.fn().mockImplementation((query) => {
+                    return {
+                        bind: vi.fn().mockImplementation(() => {
+                            return {
+                                first: vi.fn().mockImplementation(async () => {
+                                    if (query.includes("FROM authorized_users")) {
+                                        return {
+                                            user_id: "777888",
+                                            first_name: "Sarah",
+                                            role: "guest",
+                                            status: "active",
+                                            permissions: "finance,tasks" // reminders disabled!
+                                        };
+                                    }
+                                    if (query.includes("COUNT(*) as count FROM work_logs")) {
+                                        return { count: 3 };
+                                    }
+                                    if (query.includes("FROM user_settings")) {
+                                        return { display_currency: "USD" };
+                                    }
+                                    return null;
+                                }),
+                                all: vi.fn().mockResolvedValue({
+                                    results: [
+                                        { id: 1, title: "Daily standup", reminder_time: "09:00", is_active: 1 }
+                                    ]
+                                })
+                            };
+                        })
+                    };
+                })
+            };
+
+            const mockEnv = {
+                DB: mockDb,
+                TELEGRAM_BOT_TOKEN: "mock_token",
+                OWNER_ID: "849550186"
+            };
+
+            await sendMainHub(mockEnv, 777888, 777888, { first_name: "Sarah" }, "https://example.com");
+
+            expect(fetchSpy).toHaveBeenCalled();
+            const hubCall = fetchSpy.mock.calls.find(c => {
+                const body = JSON.parse(c[1]?.body || "{}");
+                return body.text?.includes("F.R.I.D.A.Y.");
+            });
+            expect(hubCall).toBeDefined();
+
+            const payload = JSON.parse(hubCall[1].body);
+            expect(payload.text).toContain("Ledger:");
+            expect(payload.text).toContain("Work Done:");
+            expect(payload.text).not.toContain("Alarms:");
+
+            const allButtons = payload.reply_markup.inline_keyboard.flat();
+            expect(allButtons.find(b => b.callback_data === "reminders")).toBeUndefined();
+            expect(allButtons.find(b => b.callback_data === "tasks_today")).toBeDefined();
+            expect(allButtons.find(b => b.callback_data === "finance_hub")).toBeDefined();
+
+            fetchSpy.mockRestore();
+        });
+
+        it("sendMainHub should hide both Alarms and Work Done when guest only has finance enabled", async () => {
+            const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+                Promise.resolve(new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }))
+            );
+
+            const mockDb = {
+                batch: vi.fn().mockResolvedValue([]),
+                prepare: vi.fn().mockImplementation((query) => {
+                    return {
+                        bind: vi.fn().mockImplementation(() => {
+                            return {
+                                first: vi.fn().mockImplementation(async () => {
+                                    if (query.includes("FROM authorized_users")) {
+                                        return {
+                                            user_id: "999111",
+                                            first_name: "李王",
+                                            role: "guest",
+                                            status: "active",
+                                            permissions: "finance" // ONLY finance! (reminders & tasks disabled)
+                                        };
+                                    }
+                                    if (query.includes("COUNT(*) as count FROM work_logs")) {
+                                        return { count: 10 };
+                                    }
+                                    if (query.includes("FROM user_settings")) {
+                                        return { display_currency: "KHR" };
+                                    }
+                                    return null;
+                                }),
+                                all: vi.fn().mockResolvedValue({
+                                    results: [
+                                        { id: 1, title: "Wake up", reminder_time: "07:00", is_active: 1 }
+                                    ]
+                                })
+                            };
+                        })
+                    };
+                })
+            };
+
+            const mockEnv = {
+                DB: mockDb,
+                TELEGRAM_BOT_TOKEN: "mock_token",
+                OWNER_ID: "849550186"
+            };
+
+            await sendMainHub(mockEnv, 999111, 999111, { first_name: "李王" }, "https://example.com");
+
+            expect(fetchSpy).toHaveBeenCalled();
+            const hubCall = fetchSpy.mock.calls.find(c => {
+                const body = JSON.parse(c[1]?.body || "{}");
+                return body.text?.includes("F.R.I.D.A.Y.");
+            });
+            expect(hubCall).toBeDefined();
+
+            const payload = JSON.parse(hubCall[1].body);
+            expect(payload.text).toContain("李王");
+            expect(payload.text).toContain("Ledger:");
+            expect(payload.text).toContain("Spent Today:");
+            // Neither Alarms nor Work Done should appear!
+            expect(payload.text).not.toContain("Alarms:");
+            expect(payload.text).not.toContain("Work Done:");
+
+            // Buttons: Only Finance Hub, Help & Guide, Settings (exactly like user's screenshot!)
+            const rows = payload.reply_markup.inline_keyboard;
+            expect(rows[0]).toEqual([{ text: "💳 Finance Hub", callback_data: "finance_hub" }]);
+            expect(rows[1]).toEqual([{ text: "💡 Help & Guide", callback_data: "help" }]);
+            expect(rows[2]).toEqual([{ text: "⚙️ Settings", callback_data: "settings" }]);
+
+            fetchSpy.mockRestore();
+        });
     });
 });

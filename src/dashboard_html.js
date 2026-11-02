@@ -1086,14 +1086,45 @@ export default `<!DOCTYPE html>
             document.getElementById('loader').style.display = 'none';
             document.getElementById('content').style.display = 'block';
 
-            const balanceKhr = data.summary.balanceKhr;
-            const incomeKhr = data.summary.totalIncomeInKhr;
-            const expenseKhr = data.summary.totalExpenseInKhr;
+            if (data.permissions) {
+                if (!data.permissions.reminders) {
+                    const rTab = document.getElementById('nav-btn-reminders');
+                    if (rTab) rTab.style.display = 'none';
+                    const rPane = document.getElementById('tab-pane-reminders');
+                    if (rPane) rPane.style.display = 'none';
+                }
+                if (!data.permissions.tasks) {
+                    const wTab = document.getElementById('nav-btn-work');
+                    if (wTab) wTab.style.display = 'none';
+                    const wPane = document.getElementById('tab-pane-work');
+                    if (wPane) wPane.style.display = 'none';
+                }
+                if (!data.permissions.finance) {
+                    const fTab = document.getElementById('nav-btn-finance');
+                    if (fTab) fTab.style.display = 'none';
+                    const fPane = document.getElementById('tab-pane-finance');
+                    if (fPane) fPane.style.display = 'none';
+                }
+
+                const isCurrentAllowed = (currentTab === 'finance' && data.permissions.finance) ||
+                                         (currentTab === 'work' && data.permissions.tasks) ||
+                                         (currentTab === 'reminders' && data.permissions.reminders);
+                if (!isCurrentAllowed) {
+                    if (data.permissions.finance) switchMainTab('finance');
+                    else if (data.permissions.tasks) switchMainTab('work');
+                    else if (data.permissions.reminders) switchMainTab('reminders');
+                }
+            }
+
+            const balanceKhr = data.summary?.balanceKhr || 0;
+            const incomeKhr = data.summary?.totalIncomeInKhr || 0;
+            const expenseKhr = data.summary?.totalExpenseInKhr || 0;
 
             // Active Reminder Status Render
             const reminderCard = document.getElementById('reminder-card');
             const reminder = data.activeReminder || data.lunchboxReminder;
-            if (reminder && reminder.is_active) {
+            const canShowReminder = (!data.permissions || data.permissions.reminders) && reminder && reminder.is_active;
+            if (canShowReminder) {
                 reminderCard.style.display = 'block';
                 const freq = reminder.frequency === 'weekdays' ? 'Weekdays (Mon–Fri)' : reminder.frequency === 'daily' ? 'Everyday' : 'Once';
                 const icon = reminder.type === 'lunchbox' ? '🎒' : reminder.type === 'standup' ? '🗣️' : reminder.type === 'expense_log' ? '💰' : '⏰';

@@ -1,9 +1,9 @@
-import { EXCHANGE_RATE, isUserAuthorized } from "../config/constants.js";
+import { EXCHANGE_RATE, isUserAuthorized, isOwner, hasUserPermission, DEFAULT_GUEST_PERMISSIONS } from "../config/constants.js";
 import { today, currentTime, monthPrefix, monthLabel, dateDaysAgo, getPreviousWorkdayDate } from "../utils/time.js";
 import { capitalize, json } from "../utils/format.js";
 import { validateTelegramInitData } from "../utils/crypto.js";
 import { ensureTables } from "../db/schema.js";
-import { getFinancialSummary, getCategoryRows } from "../db/queries.js";
+import { getFinancialSummary, getCategoryRows, getAuthorizedUser } from "../db/queries.js";
 
 export async function authenticateApiRequest(request, env) {
     const url = new URL(request.url);
@@ -48,14 +48,32 @@ export async function handleApiRequest(request, env) {
     }
     const userId = auth.userId;
 
+    const isBoss = isOwner(userId, env);
+    let guestUser = null;
+    let permissionsStr = DEFAULT_GUEST_PERMISSIONS;
+    if (!isBoss && env.DB) {
+        guestUser = await getAuthorizedUser(env.DB, userId);
+        permissionsStr = guestUser?.permissions || DEFAULT_GUEST_PERMISSIONS;
+    }
+
+    const hasFinance = isBoss || hasUserPermission("finance", permissionsStr, isBoss);
+    const hasTasks = isBoss || hasUserPermission("tasks", permissionsStr, isBoss);
+    const hasReminders = isBoss || hasUserPermission("reminders", permissionsStr, isBoss);
+
     if (request.method === "GET" || request.method === "HEAD") {
         if (url.pathname === "/api/data") {
             await ensureTables(env.DB);
-            const summary = await getFinancialSummary(env.DB, userId, "all");
-            const categories = await getCategoryRows(env.DB, userId, "month", 10);
+            const summary = hasFinance ? await getFinancialSummary(env.DB, userId, "all") : { balanceKhr: 0, totalIncomeInKhr: 0, totalExpenseInKhr: 0 };
+            const categories = hasFinance ? await getCategoryRows(env.DB, userId, "month", 10) : [];
 
-            // Optimized: Single SQL query with GROUP BY instead of 7 sequential roundtrips
-            const past7Days = [];
+            let daily = [];
+            let recentRows = { results: [] };
+            let budgetKhr = 0;
+            let monthExpenseKhr = 0;
+
+            if (hasFinance) {
+                // Optimized: Single SQL query with GROUP BY instead of 7 sequential roundtrips
+                const past7Days = [];
             for (let i = 6; i >= 0; i--) {
                 past7Days.push(dateDaysAgo(i));
             }
@@ -95,25 +113,32 @@ export async function handleApiRequest(request, env) {
             const budgetKhr = settingsRow?.monthly_budget || 0;
 
             const monthSummary = await getFinancialSummary(env.DB, userId, "month");
-            const monthExpenseKhr = monthSummary?.totalExpenseInKhr || 0;
+            monthExpenseKhr = monthSummary?.totalExpenseInKhr || 0;
+        }
 
-            const activeReminder = await env.DB.prepare(
-                "SELECT id, title, reminder_time, frequency, type, is_active FROM reminders WHERE user_id = ? AND is_active = 1 ORDER BY (CASE WHEN type = 'lunchbox' THEN 0 ELSE 1 END), id ASC LIMIT 1"
-            ).bind(userId).first();
+        const activeReminder = hasReminders ? await env.DB.prepare(
+            "SELECT id, title, reminder_time, frequency, type, is_active FROM reminders WHERE user_id = ? AND is_active = 1 ORDER BY (CASE WHEN type = 'lunchbox' THEN 0 ELSE 1 END), id ASC LIMIT 1"
+        ).bind(userId).first() : null;
 
-            return json({
-                summary,
-                categories,
-                daily,
-                recent: recentRows.results || [],
-                budgetKhr,
-                monthExpenseKhr,
-                activeReminder: activeReminder || null,
-                lunchboxReminder: activeReminder || null
-            });
+        return json({
+            summary,
+            categories,
+            daily,
+            recent: recentRows.results || [],
+            budgetKhr,
+            monthExpenseKhr,
+            activeReminder: activeReminder || null,
+            lunchboxReminder: activeReminder || null,
+            permissions: {
+                finance: hasFinance,
+                tasks: hasTasks,
+                reminders: hasReminders
+            }
+        });
         }
 
         if (url.pathname === "/api/history") {
+            if (!hasFinance) return json({ error: "Forbidden: Finance module disabled" }, 403);
             const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10));
             const limit = Math.max(1, Math.min(100, parseInt(url.searchParams.get("limit") || "20", 10)));
             const offset = (page - 1) * limit;
@@ -159,6 +184,7 @@ export async function handleApiRequest(request, env) {
         }
 
         if (url.pathname === "/api/work") {
+            if (!hasTasks) return json({ error: "Forbidden: Work & Tasks module disabled" }, 403);
             await ensureTables(env.DB);
             const curDate = today();
             const mPrefix = monthPrefix();
@@ -222,6 +248,7 @@ export async function handleApiRequest(request, env) {
         }
 
         if (url.pathname === "/api/reminders") {
+            if (!hasReminders) return json({ error: "Forbidden: Reminders module disabled" }, 403);
             await ensureTables(env.DB);
             const { results } = await env.DB.prepare(
                 "SELECT id, chat_id, title, reminder_time, frequency, type, is_active, last_sent_date FROM reminders WHERE user_id = ? ORDER BY reminder_time ASC, id ASC"
@@ -233,6 +260,7 @@ export async function handleApiRequest(request, env) {
         }
 
         if (url.pathname === "/api/export") {
+            if (!hasFinance) return json({ error: "Forbidden: Finance module disabled" }, 403);
             await ensureTables(env.DB);
             const { results } = await env.DB.prepare(
                 "SELECT date, category, amount, currency, type, created_at FROM expenses WHERE user_id = ? ORDER BY date ASC, id ASC"
@@ -257,6 +285,7 @@ export async function handleApiRequest(request, env) {
 
     if (request.method === "POST") {
         if (url.pathname === "/api/delete") {
+            if (!hasFinance) return json({ error: "Forbidden: Finance module disabled" }, 403);
             const txId = url.searchParams.get("id");
             if (!txId) {
                 return json({ error: "Missing parameters" }, 400);
@@ -270,6 +299,7 @@ export async function handleApiRequest(request, env) {
         }
 
         if (url.pathname === "/api/work/add") {
+            if (!hasTasks) return json({ error: "Forbidden: Work & Tasks module disabled" }, 403);
             const body = await request.json().catch(() => ({}));
             const content = (body.content || "").trim();
             let category = (body.category || "General").trim();
@@ -306,6 +336,7 @@ export async function handleApiRequest(request, env) {
         }
 
         if (url.pathname === "/api/work/delete") {
+            if (!hasTasks) return json({ error: "Forbidden: Work & Tasks module disabled" }, 403);
             const taskId = url.searchParams.get("id");
             if (!taskId) {
                 return json({ error: "Missing parameters" }, 400);
@@ -320,6 +351,7 @@ export async function handleApiRequest(request, env) {
         }
 
         if (url.pathname === "/api/reminders/toggle") {
+            if (!hasReminders) return json({ error: "Forbidden: Reminders module disabled" }, 403);
             const reminderId = url.searchParams.get("id");
             if (!reminderId) {
                 return json({ error: "Missing parameters" }, 400);
@@ -343,6 +375,7 @@ export async function handleApiRequest(request, env) {
         }
 
         if (url.pathname === "/api/reminders/add") {
+            if (!hasReminders) return json({ error: "Forbidden: Reminders module disabled" }, 403);
             const body = await request.json().catch(() => ({}));
             const title = (body.title || "").trim();
             const reminderTime = (body.reminder_time || "").trim();
@@ -374,6 +407,7 @@ export async function handleApiRequest(request, env) {
         }
 
         if (url.pathname === "/api/reminders/delete") {
+            if (!hasReminders) return json({ error: "Forbidden: Reminders module disabled" }, 403);
             const reminderId = url.searchParams.get("id");
             if (!reminderId) {
                 return json({ error: "Missing parameters" }, 400);
