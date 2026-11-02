@@ -1020,11 +1020,12 @@ export async function askAiCopilot(env, userQuery, context) {
     const prompt = buildCopilotPrompt(userQuery, context);
 
     if (env.GEMINI_API_KEY) {
-        // Prioritize custom or top-tier models (excluding unstable preview)
-        const candidateModels = [
+        // Prioritize ultra-fast flash-lite models for sub-second conversational latency
+        const candidateModels = Array.from(new Set([
             env?.GEMINI_MODEL,
+            "gemini-flash-lite-latest",
             ...GEMINI_MODELS
-        ].filter(Boolean).filter(m => m !== "gemini-3-flash-preview");
+        ].filter(Boolean).filter(m => m !== "gemini-3-flash-preview")));
 
         // Dynamic temperature: higher for creative/casual queries, balanced for general copilot questions
         const isCreativeQuery = /\b(joke|funny|laugh|story|say anything|chat|talk to me|how are you|who are you|bored|poem|quote|opinion)\b/i.test(userQuery);
@@ -1032,24 +1033,28 @@ export async function askAiCopilot(env, userQuery, context) {
 
         const contents = buildGeminiContents(context?.chatHistory || [], userQuery);
 
-        const requestBody = JSON.stringify({
-            system_instruction: {
-                parts: [{ text: prompt }]
-            },
-            contents,
-            tools: [
-                {
-                    function_declarations: FRIDAY_FUNCTION_DECLARATIONS
-                }
-            ],
-            generationConfig: {
-                temperature
-            }
-        });
-
         for (const model of candidateModels) {
             try {
                 const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`;
+                
+                const modelGenConfig = { temperature };
+                if (!model.includes("lite") && (model.includes("3.5") || model.includes("3.6") || model.includes("3.8") || model.includes("2.5"))) {
+                    modelGenConfig.thinkingConfig = { thinkingBudget: 0 };
+                }
+
+                const requestBody = JSON.stringify({
+                    system_instruction: {
+                        parts: [{ text: prompt }]
+                    },
+                    contents,
+                    tools: [
+                        {
+                            function_declarations: FRIDAY_FUNCTION_DECLARATIONS
+                        }
+                    ],
+                    generationConfig: modelGenConfig
+                });
+
                 let resp = await fetch(url, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },

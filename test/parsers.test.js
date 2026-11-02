@@ -252,6 +252,49 @@ describe("Natural Language Command Parsers", () => {
             expect(parseNaturalExpense("paid 20000 for gas")).toEqual({ amount: 20000, currency: null, category: "gas" });
         });
 
+        it("should parse natural command phrases with prefixes and destination suffixes", () => {
+            expect(parseNaturalExpense("add amount 3000 khr to finance hub")).toEqual({
+                amount: 3000,
+                currency: "KHR",
+                category: "Other"
+            });
+            expect(parseNaturalExpense("add 3000 khr to finance hub")).toEqual({
+                amount: 3000,
+                currency: "KHR",
+                category: "Other"
+            });
+            expect(parseNaturalExpense("add 3000 khr for lunch to finance hub")).toEqual({
+                amount: 3000,
+                currency: "KHR",
+                category: "lunch"
+            });
+            expect(parseNaturalExpense("add 3000 khr coffee")).toEqual({
+                amount: 3000,
+                currency: "KHR",
+                category: "coffee"
+            });
+            expect(parseNaturalExpense("3000 khr")).toEqual({
+                amount: 3000,
+                currency: "KHR",
+                category: "Other"
+            });
+            expect(parseNaturalExpense("3000 riel")).toEqual({
+                amount: 3000,
+                currency: "KHR",
+                category: "Other"
+            });
+            expect(parseNaturalExpense("3000 ៛")).toEqual({
+                amount: 3000,
+                currency: "KHR",
+                category: "Other"
+            });
+            expect(parseNaturalExpense("$5")).toEqual({
+                amount: 5,
+                currency: "USD",
+                category: "Other"
+            });
+        });
+
         it("should extract merchant and note when specified", () => {
             expect(parseNaturalExpense("5 coffee at starbucks")).toEqual({
                 amount: 5,

@@ -93,6 +93,14 @@ export function isConversationalOrCorrection(text) {
 }
 
 /**
+ * Strips natural target destination suffixes (e.g. "to finance hub", "to ledger", "to cashflow").
+ */
+export function stripTargetSuffix(text) {
+    if (!text || typeof text !== "string") return "";
+    return text.replace(/\s+(?:to|in|into)\s+(?:finance(?:\s+hub)?|cashflow|ledger|wallet)$/i, "").trim();
+}
+
+/**
  * Parses natural income commands.
  * Examples:
  *   "+500 salary"
@@ -107,7 +115,7 @@ export function isConversationalOrCorrection(text) {
  */
 export function parseNaturalIncome(text) {
     if (!text || typeof text !== "string") return null;
-    const clean = text.trim();
+    let clean = stripTargetSuffix(text.trim());
     if (clean.startsWith("/")) return null;
 
     // If text expresses a negation/correction, pass to AI Copilot so it can undo the mistake
@@ -120,15 +128,15 @@ export function parseNaturalIncome(text) {
     let rawCategory = "";
 
     // 1. "+500 salary" or "+$50 salary"
-    const mPlus = clean.match(/^\+\s*(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel)?(?:\s+(.*))?$/i);
+    const mPlus = clean.match(/^\+\s*(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel|៛)?(?:\s+(.*))?$/i);
     // 2. "income 500 salary" or "add income 500"
-    const mIncome = clean.match(/^(?:add\s+)?income\s*[:\s]\s*(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel)?(?:\s+(.*))?$/i);
+    const mIncome = clean.match(/^(?:add\s+)?income\s*[:\s]\s*(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel|៛)?(?:\s+(.*))?$/i);
     // 3. "40$ income", "40$ is income", "500$ salary", "$100 bonus"
-    const mSuffix = clean.match(/^(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel)?\s+(?:is\s+)?(?:my\s+)?(income|salary|bonus|deposit|revenue|earnings?|freelance)(?:\s+(.*))?$/i);
+    const mSuffix = clean.match(/^(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel|៛)?\s+(?:is\s+)?(?:my\s+)?(income|salary|bonus|deposit|revenue|earnings?|freelance)(?:\s+(.*))?$/i);
     // 4. "salary 500$", "bonus 100", "deposit 1000"
-    const mPrefix = clean.match(/^(salary|bonus|deposit)\s+(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel)?(?:\s+(.*))?$/i);
+    const mPrefix = clean.match(/^(salary|bonus|deposit)\s+(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel|៛)?(?:\s+(.*))?$/i);
     // 5. "earned 50 freelance", "received $100 bonus", "got paid 500"
-    const mEarned = clean.match(/^(?:i\s+)?(?:earned|received|got(?:\s+paid)?)\s+(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel)?\s*(?:for|from|as)?\s*(.*)$/i);
+    const mEarned = clean.match(/^(?:i\s+)?(?:earned|received|got(?:\s+paid)?)\s+(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel|៛)?\s*(?:for|from|as)?\s*(.*)$/i);
 
     if (mPlus) {
         amount = Number(mPlus[1].replace("$", ""));
@@ -189,7 +197,7 @@ export function parseNaturalIncome(text) {
     if (currencyHint) {
         const u = currencyHint.toUpperCase();
         if (u === "$" || u === "USD" || u === "DOLLARS") currency = "USD";
-        else if (u === "KHR" || u === "RIEL") currency = "KHR";
+        else if (u === "KHR" || u === "RIEL" || u === "៛") currency = "KHR";
     }
 
     const res = { amount, currency, category };
@@ -207,10 +215,13 @@ export function parseNaturalIncome(text) {
  *   "spent $15 on dinner"
  *   "paid 20000 for gas"
  *   "bought coffee for $4"
+ *   "add amount 3000 khr to finance hub"
+ *   "add 3000 khr"
+ *   "3000 khr"
  */
 export function parseNaturalExpense(text) {
     if (!text || typeof text !== "string") return null;
-    const clean = text.trim();
+    let clean = text.trim();
     if (clean.startsWith("/")) return null;
 
     // Never match conversational or corrective messages as expenses!
@@ -223,35 +234,65 @@ export function parseNaturalExpense(text) {
         return null;
     }
 
-    const expMatch3 = clean.match(/^(?:i\s+)?(?:spent|paid|bought)\s+(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel)?\s*(?:on|for)?\s*([a-zA-Z0-9\s()@'-]+)$/i);
-    const expMatch4 = clean.match(/^(?:i\s+)?(?:spent|paid|bought)\s+([a-zA-Z0-9\s()@'-]+)\s+(?:for|at)?\s+(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel)?$/i);
-    const expMatch1 = clean.match(/^(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$)?\s+([a-zA-Z0-9\s()@'-]+)$/i);
-    const expMatch2 = clean.match(/^([a-zA-Z0-9\s()@'-]+)\s+(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$)?$/i);
+    // 1. Strip target destination phrases (e.g. "to finance hub", "in finance hub", "to ledger", "to cashflow")
+    clean = stripTargetSuffix(clean);
+
+    // 2. Detect and strip natural action prefixes (e.g. "add amount", "add expense", "add", "log", "record", "put", "track")
+    const hasActionPrefix = /^(?:add\s+(?:an?\s+)?(?:amount|expense)|add|log|record|put|track)\s+/i.test(clean);
+    if (hasActionPrefix) {
+        clean = clean.replace(/^(?:add\s+(?:an?\s+)?(?:amount|expense)|add|log|record|put|track)\s+/i, "").trim();
+    }
 
     let amount = null;
     let category = null;
     let currencyHint = null;
 
-    if (expMatch3) {
-        amount = Number(expMatch3[1].replace("$", ""));
-        currencyHint = expMatch3[2] || (expMatch3[1].includes("$") ? "USD" : null);
-        category = expMatch3[3].trim();
-    } else if (expMatch4) {
-        amount = Number(expMatch4[2].replace("$", ""));
-        currencyHint = expMatch4[3] || (expMatch4[2].includes("$") ? "USD" : null);
-        category = expMatch4[1].trim();
-    } else if (expMatch1) {
-        amount = Number(expMatch1[1].replace("$", ""));
-        currencyHint = expMatch1[2] || (expMatch1[1].includes("$") ? "USD" : null);
-        category = expMatch1[3].trim();
-    } else if (expMatch2) {
-        amount = Number(expMatch2[2].replace("$", ""));
-        currencyHint = expMatch2[3] || (expMatch2[2].includes("$") ? "USD" : null);
-        category = expMatch2[1].trim();
+    // 3. Standalone amount (e.g. "3000 khr", "3000 riel", "3000 ៛", "$5", "5$", "5 usd", or bare "3000" if explicit action prefix / large amount)
+    const standaloneMatch = clean.match(/^(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel|៛)?$/i);
+    if (standaloneMatch) {
+        const rawAmount = Number(standaloneMatch[1].replace("$", ""));
+        const rawCurr = standaloneMatch[2] || (standaloneMatch[1].includes("$") ? "USD" : null);
+        if (rawCurr || hasActionPrefix || rawAmount >= 100) {
+            amount = rawAmount;
+            currencyHint = rawCurr;
+            category = "Other";
+        }
+    }
+
+    // 4. Standard expense patterns
+    if (!amount) {
+        const expMatch3 = clean.match(/^(?:i\s+)?(?:spent|paid|bought)\s+(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel|៛)?\s*(?:on|for)?\s*([a-zA-Z0-9\s()@'-]+)$/i);
+        const expMatch4 = clean.match(/^(?:i\s+)?(?:spent|paid|bought)\s+([a-zA-Z0-9\s()@'-]+)\s+(?:for|at)?\s+(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel|៛)?$/i);
+        const expMatch1 = clean.match(/^(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel|៛)?\s+(?:for|on\s+)?([a-zA-Z0-9\s()@'-]+)$/i);
+        const expMatch2 = clean.match(/^([a-zA-Z0-9\s()@'-]+)\s+(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel|៛)?$/i);
+
+        if (expMatch3) {
+            amount = Number(expMatch3[1].replace("$", ""));
+            currencyHint = expMatch3[2] || (expMatch3[1].includes("$") ? "USD" : null);
+            category = expMatch3[3].trim();
+        } else if (expMatch4) {
+            amount = Number(expMatch4[2].replace("$", ""));
+            currencyHint = expMatch4[3] || (expMatch4[2].includes("$") ? "USD" : null);
+            category = expMatch4[1].trim();
+        } else if (expMatch1) {
+            amount = Number(expMatch1[1].replace("$", ""));
+            currencyHint = expMatch1[2] || (expMatch1[1].includes("$") ? "USD" : null);
+            category = expMatch1[3].trim();
+        } else if (expMatch2) {
+            amount = Number(expMatch2[2].replace("$", ""));
+            currencyHint = expMatch2[3] || (expMatch2[2].includes("$") ? "USD" : null);
+            category = expMatch2[1].trim();
+        }
     }
 
     if (!amount || !Number.isFinite(amount) || amount <= 0 || !category) {
         return null;
+    }
+
+    // Clean leading prepositions from category like "for lunch" -> "lunch", "on dinner" -> "dinner"
+    category = category.replace(/^(?:for|on)\s+/i, "").trim();
+    if (!category) {
+        category = "Other";
     }
 
     // Category safety guards:
@@ -292,7 +333,7 @@ export function parseNaturalExpense(text) {
     if (currencyHint) {
         const u = currencyHint.toUpperCase();
         if (u === "$" || u === "USD" || u === "DOLLARS") currency = "USD";
-        else if (u === "KHR" || u === "RIEL") currency = "KHR";
+        else if (u === "KHR" || u === "RIEL" || u === "៛") currency = "KHR";
     }
 
     const res = { amount, currency, category };
