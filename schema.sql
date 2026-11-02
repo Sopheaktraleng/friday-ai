@@ -125,6 +125,7 @@ CREATE TABLE IF NOT EXISTS authorized_users (
     first_name TEXT,
     role TEXT NOT NULL DEFAULT 'guest', -- 'owner' | 'guest'
     status TEXT NOT NULL DEFAULT 'active', -- 'active' | 'pending' | 'revoked'
+    permissions TEXT NOT NULL DEFAULT 'finance,tasks,reminders,ai_dialog',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     approved_by TEXT
 );

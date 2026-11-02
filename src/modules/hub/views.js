@@ -1,6 +1,6 @@
-import { TIME_ZONE, isOwner, OWNER_USER_ID } from "../../config/constants.js";
+import { TIME_ZONE, isOwner, OWNER_USER_ID, hasUserPermission, formatUserPermissionsSummary, DEFAULT_GUEST_PERMISSIONS } from "../../config/constants.js";
 import { ensureTables } from "../../db/schema.js";
-import { getDisplayCurrency, getFinancialSummary, getUserVoiceMode, listAuthorizedUsers } from "../../db/queries.js";
+import { getDisplayCurrency, getFinancialSummary, getUserVoiceMode, listAuthorizedUsers, getAuthorizedUser } from "../../db/queries.js";
 import { monthPrefix, monthLabel } from "../../utils/time.js";
 import { formatAmount, cleanMd } from "../../utils/format.js";
 import { safeEditOrSendMessage } from "../../services/telegram.js";
@@ -84,16 +84,33 @@ export async function sendMainHub(env, chatId, userId, from, origin, messageId =
         `_Standing by whenever you're ready._`
     ].join("\n");
 
-    const hubButtons = [
-        [
-            { text: "💳 Finance Hub", callback_data: "finance_hub" },
-            { text: "📋 Today's Tasks", callback_data: "tasks_today" }
-        ],
-        [
-            { text: "⏰ Reminders", callback_data: "reminders" },
-            { text: "💡 Help & Guide", callback_data: "help" }
-        ]
-    ];
+    let guestUser = null;
+    let permissionsStr = DEFAULT_GUEST_PERMISSIONS;
+    if (!isUserOwner) {
+        guestUser = await getAuthorizedUser(env.DB, userId);
+        permissionsStr = guestUser?.permissions || DEFAULT_GUEST_PERMISSIONS;
+    }
+
+    const hasFinance = isUserOwner || hasUserPermission("finance", permissionsStr, isUserOwner);
+    const hasTasks = isUserOwner || hasUserPermission("tasks", permissionsStr, isUserOwner);
+    const hasReminders = isUserOwner || hasUserPermission("reminders", permissionsStr, isUserOwner);
+
+    const hubButtons = [];
+    const row1 = [];
+    if (hasFinance) {
+        row1.push({ text: "💳 Finance Hub", callback_data: "finance_hub" });
+    }
+    if (hasTasks) {
+        row1.push({ text: "📋 Today's Tasks", callback_data: "tasks_today" });
+    }
+    if (row1.length > 0) hubButtons.push(row1);
+
+    const row2 = [];
+    if (hasReminders) {
+        row2.push({ text: "⏰ Reminders", callback_data: "reminders" });
+    }
+    row2.push({ text: "💡 Help & Guide", callback_data: "help" });
+    hubButtons.push(row2);
 
     if (isUserOwner) {
         hubButtons.push([
@@ -182,7 +199,9 @@ export async function sendUserManagementMenu(env, chatId, userId, messageId = nu
         textLines.push(`🟢 *Active Guests (${activeGuests.length}):*`);
         for (const g of activeGuests) {
             const uName = g.username ? ` (@${g.username})` : "";
+            const permSummary = formatUserPermissionsSummary(g.permissions);
             textLines.push(`• *${cleanMd(g.first_name || "Guest")}*${uName} — \`${g.user_id}\``);
+            textLines.push(`  └ _Features:_ \`${permSummary}\``);
         }
         textLines.push("");
     } else {
@@ -198,7 +217,7 @@ export async function sendUserManagementMenu(env, chatId, userId, messageId = nu
         textLines.push("");
     }
 
-    textLines.push(`_Manage approvals or revoke guest access below:_`);
+    textLines.push(`_Tap ⚙️ Manage to configure feature access (e.g. Finance-only) or revoke access:_`);
 
     const keyboard = [];
 
@@ -210,10 +229,12 @@ export async function sendUserManagementMenu(env, chatId, userId, messageId = nu
         ]);
     }
 
-    // Revocation for active guests
+    // Active guests: button to manage permissions & revoke
     for (const g of activeGuests) {
+        const name = g.first_name || g.user_id;
         keyboard.push([
-            { text: `🚫 Revoke ${g.first_name || g.user_id}`, callback_data: `revoke_user:${g.user_id}` }
+            { text: `⚙️ Manage ${name}`, callback_data: `manage_guest:${g.user_id}` },
+            { text: `🚫 Revoke`, callback_data: `revoke_user:${g.user_id}` }
         ]);
     }
 
@@ -226,6 +247,64 @@ export async function sendUserManagementMenu(env, chatId, userId, messageId = nu
     ]);
 
     await safeEditOrSendMessage(env, chatId, messageId, textLines.join("\n"), {
+        parse_mode: "Markdown",
+        reply_markup: { inline_keyboard: keyboard }
+    });
+}
+
+export async function sendGuestPermissionsMenu(env, chatId, userId, targetGuestId, messageId = null) {
+    await ensureTables(env.DB);
+    const guest = await getAuthorizedUser(env.DB, targetGuestId);
+    if (!guest) {
+        await safeEditOrSendMessage(env, chatId, messageId, "⚠️ User not found in database.", {
+            reply_markup: {
+                inline_keyboard: [[{ text: "‹ Back to Users", callback_data: "manage_users" }]]
+            }
+        });
+        return;
+    }
+
+    const rawPerms = (guest.permissions || DEFAULT_GUEST_PERMISSIONS).split(",").map(p => p.trim().toLowerCase());
+    const hasFinance = rawPerms.includes("finance");
+    const hasTasks = rawPerms.includes("tasks");
+    const hasReminders = rawPerms.includes("reminders");
+    const hasAiDialog = rawPerms.includes("ai_dialog");
+
+    const text = [
+        `👤 *Guest Feature Manager*`,
+        ``,
+        `• *User:* ${cleanMd(guest.first_name || "Guest")}${guest.username ? ` (@${guest.username})` : ""}`,
+        `• *ID:* \`${guest.user_id}\``,
+        `• *Status:* \`${guest.status}\` | *Role:* \`${guest.role}\``,
+        ``,
+        `🛡️ *Feature Access Matrix:*`,
+        `• 💳 Finance Hub & Logging: ${hasFinance ? "🟢 *Enabled*" : "🔴 *Disabled*"}`,
+        `• 📋 Tasks & Work Logging: ${hasTasks ? "🟢 *Enabled*" : "🔴 *Disabled*"}`,
+        `• ⏰ Reminders & Alarms: ${hasReminders ? "🟢 *Enabled*" : "🔴 *Disabled*"}`,
+        `• 🤖 AI Dialog & Web Search: ${hasAiDialog ? "🟢 *Enabled*" : "🔴 *Disabled*"}`,
+        ``,
+        `_Tap any feature below to toggle on or off:_`
+    ].join("\n");
+
+    const keyboard = [
+        [
+            { text: `💳 Finance: ${hasFinance ? "✅ ON" : "❌ OFF"}`, callback_data: `toggle_perm:${guest.user_id}:finance` },
+            { text: `📋 Tasks: ${hasTasks ? "✅ ON" : "❌ OFF"}`, callback_data: `toggle_perm:${guest.user_id}:tasks` }
+        ],
+        [
+            { text: `⏰ Reminders: ${hasReminders ? "✅ ON" : "❌ OFF"}`, callback_data: `toggle_perm:${guest.user_id}:reminders` },
+            { text: `🤖 AI Dialog: ${hasAiDialog ? "✅ ON" : "❌ OFF"}`, callback_data: `toggle_perm:${guest.user_id}:ai_dialog` }
+        ],
+        [
+            { text: `🚫 Revoke User`, callback_data: `revoke_user:${guest.user_id}` },
+            { text: "‹ Back to Users", callback_data: "manage_users" }
+        ],
+        [
+            { text: "🏠 Main Hub", callback_data: "hub" }
+        ]
+    ];
+
+    await safeEditOrSendMessage(env, chatId, messageId, text, {
         parse_mode: "Markdown",
         reply_markup: { inline_keyboard: keyboard }
     });
@@ -245,7 +324,6 @@ export async function sendHelpMessage(env, chatId, messageId = null, userId = nu
     }
 
     assistantFeatures.push(
-        `• \`/briefing\` or \`/friday\` — Tactical morning/status briefing`,
         `• \`/remember <fact>\` — Teach Friday personal preferences & habits`,
         `• \`/memory\` — Inspect Friday's long-term memory matrix`,
         `• \`/reset\` — Clear active multi-turn conversation context`,

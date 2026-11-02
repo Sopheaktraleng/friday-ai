@@ -370,7 +370,7 @@ export async function handleImageReceipt(message, env, origin) {
                         reply_markup: {
                             inline_keyboard: [
                                 [
-                                    { text: "🛡️ Tactical Briefing", callback_data: "friday_briefing" },
+                                    { text: "💳 Finance Hub", callback_data: "finance_hub" },
                                     { text: "🏠 Main Hub", callback_data: "hub" }
                                 ]
                             ]

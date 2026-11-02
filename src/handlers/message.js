@@ -1,7 +1,7 @@
 import { today, dateDaysAgo } from "../utils/time.js";
 import { formatAmount, formatMoney, cleanMd, capitalize } from "../utils/format.js";
-import { isUserAuthorized, isUserAuthorizedAsync, isOwner, OWNER_USER_ID } from "../config/constants.js";
-import { telegram, sendMessage, sendTelegramVoice, syncBotCommands } from "../services/telegram.js";
+import { isUserAuthorized, isUserAuthorizedAsync, isOwner, OWNER_USER_ID, hasUserPermission, formatUserPermissionsSummary } from "../config/constants.js";
+import { telegram, sendMessage, sendTelegramVoice, syncBotCommands, syncUserBotCommands } from "../services/telegram.js";
 import { generateSpeechAudio, askGeminiWithGoogleSearch } from "../services/ai.js";
 import {
     getDisplayCurrency,
@@ -20,12 +20,14 @@ import {
     setUserBriefingMode,
     getLastModelChatMessage,
     addOrUpdateAuthorizedUser,
-    setAuthorizedUserStatus
+    setAuthorizedUserStatus,
+    getAuthorizedUser,
+    updateUserPermissions
 } from "../db/queries.js";
 import { isConversationalOrCorrection, isCompoundOrMultiAction, isRealTimeSearchQuery, parseNaturalIncome, parseNaturalExpense } from "../utils/natural.js";
 
 // Hub
-import { sendMainHub, sendHelpMessage, sendSettingsMenu, sendUserManagementMenu } from "../modules/hub/views.js";
+import { sendMainHub, sendHelpMessage, sendSettingsMenu, sendUserManagementMenu, sendGuestPermissionsMenu } from "../modules/hub/views.js";
 
 // Finance
 import {
@@ -185,6 +187,23 @@ export async function handleRealTimeSearchCommand(env, chatId, userId, query, me
     });
 }
 
+export async function sendFeatureRestricted(env, chatId, featureName, from) {
+    const name = from?.first_name || "there";
+    await sendMessage(
+        env,
+        chatId,
+        `🔒 *Feature Restricted*\n\nSorry ${cleanMd(name)}, the *${featureName}* feature is currently disabled for your guest account.\n\nPlease contact Boss to request access to this feature.`,
+        {
+            parse_mode: "Markdown",
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: "🏠 Main Hub", callback_data: "hub" }]
+                ]
+            }
+        }
+    );
+}
+
 export async function handleMessage(message, env, origin) {
     const rawText = (message.text || "").trim();
     // Normalize command by stripping bot username suffix if present (e.g., /today@my_bot -> /today)
@@ -218,8 +237,30 @@ export async function handleMessage(message, env, origin) {
         return;
     }
 
+    // In group chats, ignore arbitrary conversational text unless directly replying to the bot
+    if (!text.startsWith("/") && !message.photo && !message.voice && !message.document) {
+        if (isGroup && !message.reply_to_message?.from?.is_bot) {
+            return;
+        }
+    }
+
+    const isBoss = isOwner(userId, env);
+    let guestUser = null;
+    if (!isBoss) {
+        guestUser = await getAuthorizedUser(env.DB, userId);
+    }
+
+    const checkFeature = (name, key) => {
+        if (isBoss) return true;
+        return hasUserPermission(key, guestUser?.permissions, isBoss);
+    };
+
     // 0. Smart Bank Slip & Receipt Scanner (Photo or Image Document)
     if (message.photo || (message.document && message.document.mime_type && message.document.mime_type.startsWith("image/"))) {
+        if (!checkFeature("Finance & Receipts", "finance")) {
+            await sendFeatureRestricted(env, chatId, "Finance Hub & Receipt Scanning", message.from);
+            return;
+        }
         await handleImageReceipt(message, env, origin);
         return;
     }
@@ -229,6 +270,10 @@ export async function handleMessage(message, env, origin) {
         message.document.mime_type === "application/pdf" ||
         (message.document.file_name && message.document.file_name.toLowerCase().endsWith(".pdf"))
     )) {
+        if (!checkFeature("Finance & PDF Statements", "finance")) {
+            await sendFeatureRestricted(env, chatId, "Finance Hub & PDF Statements", message.from);
+            return;
+        }
         await handlePdfDocument(message, env, origin);
         return;
     }
@@ -322,6 +367,10 @@ export async function handleMessage(message, env, origin) {
         text.startsWith("/friday ") || 
         text.startsWith("/briefing ")
     ) {
+        if (!checkFeature("AI Briefing", "ai_dialog")) {
+            await sendFeatureRestricted(env, chatId, "Tactical Briefings & Status", message.from);
+            return;
+        }
         const sub = text.replace(/^\/(friday|briefing|brief|status)(@\w+)?\s*/i, "").trim().toLowerCase();
         if (sub === "on") {
             await setUserBriefingMode(env.DB, userId, "on");
@@ -364,6 +413,10 @@ export async function handleMessage(message, env, origin) {
         text === "/google" ||
         text === "/weather"
     ) {
+        if (!checkFeature("Live Search", "ai_dialog")) {
+            await sendFeatureRestricted(env, chatId, "Live Google Search Grounding", message.from);
+            return;
+        }
         let q = text.replace(/^\/(search|web|google|weather)(@\w+)?\s*/i, "").trim();
         if (text.startsWith("/weather") && !q) {
             q = "weather in Phnom Penh today";
@@ -392,6 +445,10 @@ export async function handleMessage(message, env, origin) {
         text === "/say" ||
         text === "/talk"
     ) {
+        if (!checkFeature("AI Voice", "ai_dialog")) {
+            await sendFeatureRestricted(env, chatId, "Voice & Audio Generation", message.from);
+            return;
+        }
         const query = text.replace(/^\/(speak|say|talk)(@\w+)?\s*/i, "").trim();
 
         // 1. If Boss replied to a message with /speak, read that replied message aloud!
@@ -442,6 +499,10 @@ export async function handleMessage(message, env, origin) {
         text === "/ai" ||
         text === "/copilot"
     ) {
+        if (!checkFeature("AI Assistant", "ai_dialog")) {
+            await sendFeatureRestricted(env, chatId, "AI Assistant & Copilot", message.from);
+            return;
+        }
         const query = text.replace(/^\/(ask|ai|copilot)(@\w+)?\s*/i, "").trim();
         await handleAiCopilotQuery(env, chatId, userId, query, message.from, null, message.isFromVoice || false);
         return;
@@ -607,7 +668,7 @@ export async function handleMessage(message, env, origin) {
                 reply_markup: {
                     inline_keyboard: [
                         [
-                            { text: "🛡️ Tactical Briefing", callback_data: "friday_briefing" },
+                            { text: "💳 Finance Hub", callback_data: "finance_hub" },
                             { text: "🏠 Main Hub", callback_data: "hub" }
                         ]
                     ]
@@ -624,17 +685,29 @@ export async function handleMessage(message, env, origin) {
     }
 
     if (text === "/finance" || text === "/cashflow" || text === "/money" || text === "/f") {
+        if (!checkFeature("Finance", "finance")) {
+            await sendFeatureRestricted(env, chatId, "Finance Hub", message.from);
+            return;
+        }
         await sendFinanceHub(env, chatId, userId);
         return;
     }
 
     // 2. Work & Tasks Workspace
     if (text === "/tasks" || text === "/task" || text === "/work" || text === "/worklog" || text === "/w") {
+        if (!checkFeature("Tasks", "tasks")) {
+            await sendFeatureRestricted(env, chatId, "Task & Work Logging", message.from);
+            return;
+        }
         await handleListTodayTasksCommand(env, chatId, userId);
         return;
     }
 
     if (text.startsWith("/done") || text.startsWith("/did") || text.startsWith("/log")) {
+        if (!checkFeature("Tasks", "tasks")) {
+            await sendFeatureRestricted(env, chatId, "Task & Work Logging", message.from);
+            return;
+        }
         const parts = text.split(/\s+/);
         if (parts.length === 1) {
             await handleListTodayTasksCommand(env, chatId, userId);
@@ -646,16 +719,28 @@ export async function handleMessage(message, env, origin) {
 
     // 3. Reminders & Alarms Commands
     if (text.startsWith("/remind") || text.startsWith("/alarm")) {
+        if (!checkFeature("Reminders", "reminders")) {
+            await sendFeatureRestricted(env, chatId, "Reminders & Alarms", message.from);
+            return;
+        }
         await handleRemindCommand(env, chatId, userId, text);
         return;
     }
 
     if (text === "/reminders" || text === "/reminder" || text === "/r") {
+        if (!checkFeature("Reminders", "reminders")) {
+            await sendFeatureRestricted(env, chatId, "Reminders Hub", message.from);
+            return;
+        }
         await sendRemindersMenu(env, chatId, userId);
         return;
     }
 
     if (text === "/focus" || text === "/pomodoro" || text === "/sprint") {
+        if (!checkFeature("Reminders", "reminders")) {
+            await sendFeatureRestricted(env, chatId, "Focus & Pomodoro Sprints", message.from);
+            return;
+        }
         await sendFocusMenu(env, chatId);
         return;
     }
@@ -684,6 +769,10 @@ export async function handleMessage(message, env, origin) {
 
     // 4. Logging Expenses & Income
     if (text.startsWith("/add") || text.startsWith("/a ") || text === "/a") {
+        if (!checkFeature("Finance", "finance")) {
+            await sendFeatureRestricted(env, chatId, "Finance Hub & Expense Logging", message.from);
+            return;
+        }
         if (text === "/add" || text === "/a") {
             await sendCategoryPicker(env, chatId, "expense");
             return;
@@ -693,6 +782,10 @@ export async function handleMessage(message, env, origin) {
     }
 
     if (text.startsWith("/income") || text.startsWith("/i ") || text === "/i") {
+        if (!checkFeature("Finance", "finance")) {
+            await sendFeatureRestricted(env, chatId, "Finance Hub & Income Logging", message.from);
+            return;
+        }
         if (text === "/income" || text === "/i") {
             await sendCategoryPicker(env, chatId, "income");
             return;
@@ -703,16 +796,28 @@ export async function handleMessage(message, env, origin) {
 
     // 5. Ledger & Summaries
     if (text === "/transactions" || text === "/today" || text === "/t" || text === "/td") {
+        if (!checkFeature("Finance", "finance")) {
+            await sendFeatureRestricted(env, chatId, "Finance Hub & Ledger", message.from);
+            return;
+        }
         await sendTransactions(env, chatId, userId);
         return;
     }
 
     if (text === "/summary" || text === "/month") {
+        if (!checkFeature("Finance", "finance")) {
+            await sendFeatureRestricted(env, chatId, "Finance Hub & Summary", message.from);
+            return;
+        }
         await sendSummary(env, chatId, userId, "month");
         return;
     }
 
     if (text === "/week") {
+        if (!checkFeature("Finance", "finance")) {
+            await sendFeatureRestricted(env, chatId, "Finance Hub & Weekly Report", message.from);
+            return;
+        }
         const startDate = dateDaysAgo(6);
         const endDate = today();
         await sendWeeklyReportForUser(env, chatId, userId, startDate, endDate, "Weekly Spending Report (Rolling 7 Days)");
@@ -720,11 +825,19 @@ export async function handleMessage(message, env, origin) {
     }
 
     if (text === "/categories") {
+        if (!checkFeature("Finance", "finance")) {
+            await sendFeatureRestricted(env, chatId, "Finance Hub & Categories", message.from);
+            return;
+        }
         await sendCategoryBreakdown(env, chatId, userId, "month");
         return;
     }
 
     if (text === "/transactions all" || text.startsWith("/history") || text === "/all") {
+        if (!checkFeature("Finance", "finance")) {
+            await sendFeatureRestricted(env, chatId, "Finance Hub & History", message.from);
+            return;
+        }
         const parts = text.split(/\s+/);
         let page = 1;
         if (parts.length > 1) {
@@ -739,6 +852,10 @@ export async function handleMessage(message, env, origin) {
 
     // 6. Settings & Budget
     if (text.startsWith("/budget") || text.startsWith("/b ") || text === "/b") {
+        if (!checkFeature("Finance", "finance")) {
+            await sendFeatureRestricted(env, chatId, "Budget Settings", message.from);
+            return;
+        }
         await handleBudgetCommand(env, chatId, userId, text);
         return;
     }
@@ -786,6 +903,35 @@ export async function handleMessage(message, env, origin) {
         const parts = text.split(/\s+/);
         const sub = (parts[1] || "").toLowerCase();
         const targetId = (parts[2] || "").trim();
+
+        if ((sub === "perm" || sub === "perms" || sub === "permission" || sub === "permissions") && targetId) {
+            let perms = (parts.slice(3).join(",") || "").trim().toLowerCase();
+            if (!perms) perms = "finance";
+            if (perms === "all") perms = "finance,tasks,reminders,ai_dialog";
+            if (perms === "none") perms = "";
+
+            await updateUserPermissions(env.DB, targetId, perms);
+            await syncUserBotCommands(env, targetId, perms, "guest");
+            const userObj = await getAuthorizedUser(env.DB, targetId);
+            const targetName = userObj?.first_name || targetId;
+            const summary = formatUserPermissionsSummary(perms);
+
+            await sendMessage(
+                env,
+                chatId,
+                `✅ *Updated Feature Permissions*\n\n👤 *User:* ${cleanMd(targetName)} (\`${targetId}\`)\n🛡️ *Active Features:* \`${summary}\``,
+                {
+                    parse_mode: "Markdown",
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: `⚙️ Configure ${targetName}`, callback_data: `manage_guest:${targetId}` }],
+                            [{ text: "👥 User Access Matrix", callback_data: "manage_users" }]
+                        ]
+                    }
+                }
+            );
+            return;
+        }
 
         if (sub === "add" && targetId) {
             await addOrUpdateAuthorizedUser(env.DB, {
@@ -918,31 +1064,55 @@ export async function handleMessage(message, env, origin) {
         }
 
         if (lower === "work" || lower === "tasks" || lower === "task") {
+            if (!checkFeature("Tasks", "tasks")) {
+                await sendFeatureRestricted(env, chatId, "Task & Work Logging", message.from);
+                return;
+            }
             await handleListTodayTasksCommand(env, chatId, userId);
             return;
         }
 
         if (lower === "today" || lower === "spent" || lower === "ledger") {
+            if (!checkFeature("Finance", "finance")) {
+                await sendFeatureRestricted(env, chatId, "Finance Hub & Ledger", message.from);
+                return;
+            }
             await sendTransactions(env, chatId, userId);
             return;
         }
 
         if (lower === "finance" || lower === "money" || lower === "cashflow" || lower === "balance") {
+            if (!checkFeature("Finance", "finance")) {
+                await sendFeatureRestricted(env, chatId, "Finance Hub", message.from);
+                return;
+            }
             await sendFinanceHub(env, chatId, userId);
             return;
         }
 
         if (lower === "reminder" || lower === "reminders" || lower === "alarm" || lower === "alarms") {
+            if (!checkFeature("Reminders", "reminders")) {
+                await sendFeatureRestricted(env, chatId, "Reminders & Alarms", message.from);
+                return;
+            }
             await sendRemindersMenu(env, chatId, userId);
             return;
         }
 
         if (lower === "focus" || lower === "pomodoro" || lower === "sprint") {
+            if (!checkFeature("Reminders", "reminders")) {
+                await sendFeatureRestricted(env, chatId, "Focus & Pomodoro Sprints", message.from);
+                return;
+            }
             await sendFocusMenu(env, chatId);
             return;
         }
 
         if (lower === "scan" || lower === "receipt" || lower === "slip" || lower === "ocr") {
+            if (!checkFeature("Finance & Receipts", "finance")) {
+                await sendFeatureRestricted(env, chatId, "Finance Hub & Receipt Scanning", message.from);
+                return;
+            }
             await sendScanHelp(env, chatId);
             return;
         }
@@ -954,6 +1124,10 @@ export async function handleMessage(message, env, origin) {
 
         // 2. Natural Reminder: e.g. "remind 17:30 Bring lunch box", "remind in 30m Check oven", "remind 9am Standup"
         if (lower.startsWith("remind ") || lower.startsWith("remindme ") || lower.startsWith("alarm ")) {
+            if (!checkFeature("Reminders", "reminders")) {
+                await sendFeatureRestricted(env, chatId, "Reminders & Alarms", message.from);
+                return;
+            }
             await handleRemindCommand(env, chatId, userId, text);
             return;
         }
@@ -966,6 +1140,10 @@ export async function handleMessage(message, env, origin) {
             lower.startsWith("completed ") ||
             lower.startsWith("log ")
         ) {
+            if (!checkFeature("Tasks", "tasks")) {
+                await sendFeatureRestricted(env, chatId, "Task & Work Logging", message.from);
+                return;
+            }
             const cleanContent = text.replace(/^(done|did|finished|completed|log)\s+/i, "").trim();
             if (cleanContent) {
                 await handleAddWorkLogCommand(env, chatId, userId, `/done ${cleanContent}`, message.from);
@@ -984,6 +1162,10 @@ export async function handleMessage(message, env, origin) {
             lower === "delete last income" ||
             lower === "cancel last"
         ) {
+            if (!checkFeature("Finance", "finance")) {
+                await sendFeatureRestricted(env, chatId, "Finance Hub & Transactions", message.from);
+                return;
+            }
             const filter = lower.includes("income") ? "income" : (lower.includes("expense") ? "expense" : null);
             await handleUndoLastTransaction(env, chatId, userId, filter, message);
             return;
@@ -994,6 +1176,10 @@ export async function handleMessage(message, env, origin) {
         if (undoMatch) {
             const targetFilter = undoMatch[1].trim();
             if (!["all", "history", "everything", "task", "tasks", "reminder", "reminders", "chat", "ledger", "today"].includes(targetFilter)) {
+                if (!checkFeature("Finance", "finance")) {
+                    await sendFeatureRestricted(env, chatId, "Finance Hub & Transactions", message.from);
+                    return;
+                }
                 await handleUndoLastTransaction(env, chatId, userId, targetFilter, message);
                 return;
             }
@@ -1002,6 +1188,10 @@ export async function handleMessage(message, env, origin) {
         // 5. Natural Income: e.g. "+500 salary", "income 500", "40$ income", "500$ salary", "earned $50 freelance"
         const incData = parseNaturalIncome(text);
         if (incData) {
+            if (!checkFeature("Finance", "finance")) {
+                await sendFeatureRestricted(env, chatId, "Finance Hub & Income Logging", message.from);
+                return;
+            }
             let curr = await getDisplayCurrency(env.DB, userId);
             if (incData.currency) {
                 curr = incData.currency;
@@ -1036,6 +1226,10 @@ export async function handleMessage(message, env, origin) {
         // 6. Natural Expense: e.g. "5 coffee", "$5 coffee", "5$ coffee", "10000 lunch", "coffee 5", "spent $15 on dinner"
         const expData = parseNaturalExpense(text);
         if (expData) {
+            if (!checkFeature("Finance", "finance")) {
+                await sendFeatureRestricted(env, chatId, "Finance Hub & Expense Logging", message.from);
+                return;
+            }
             let curr = await getDisplayCurrency(env.DB, userId);
             if (expData.currency) {
                 curr = expData.currency;
@@ -1070,6 +1264,10 @@ export async function handleMessage(message, env, origin) {
 
         // 6. Natural Language F.R.I.D.A.Y. AI Copilot fallback (or friendly guidance if AI not configured)
         if (env.GEMINI_API_KEY || env.AI) {
+            if (!checkFeature("AI Dialog", "ai_dialog")) {
+                await sendFeatureRestricted(env, chatId, "AI Dialog & Assistant", message.from);
+                return;
+            }
             let queryText = text;
             if (/^(?:hey\s+)?friday[,:]?\s+/i.test(queryText)) {
                 queryText = queryText.replace(/^(?:hey\s+)?friday[,:]?\s+/i, "");

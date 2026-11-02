@@ -355,7 +355,7 @@ export async function handleAiCopilotQuery(env, chatId, userId, query, from, mes
                 reply_markup: {
                     inline_keyboard: [
                         [
-                            { text: "🛡️ Tactical Briefing", callback_data: "friday_briefing" },
+                            { text: "💳 Finance Hub", callback_data: "finance_hub" },
                             { text: "📊 Summary", callback_data: "summary_today" }
                         ],
                         [

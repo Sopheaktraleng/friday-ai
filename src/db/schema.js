@@ -91,6 +91,7 @@ const TABLE_SCHEMAS = [
         first_name TEXT,
         role TEXT NOT NULL DEFAULT 'guest',
         status TEXT NOT NULL DEFAULT 'active',
+        permissions TEXT NOT NULL DEFAULT 'finance,tasks,reminders,ai_dialog',
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         approved_by TEXT
     );`,
@@ -135,6 +136,9 @@ export async function ensureTables(db) {
         } catch (e) {}
         try {
             await db.prepare("ALTER TABLE expenses ADD COLUMN note TEXT").run();
+        } catch (e) {}
+        try {
+            await db.prepare("ALTER TABLE authorized_users ADD COLUMN permissions TEXT NOT NULL DEFAULT 'finance,tasks,reminders,ai_dialog'").run();
         } catch (e) {}
         try {
             await db.prepare(`CREATE TABLE IF NOT EXISTS daily_broadcast_logs (

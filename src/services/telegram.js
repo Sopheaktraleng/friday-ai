@@ -1,3 +1,5 @@
+import { isOwner, hasUserPermission } from "../config/constants.js";
+
 export async function telegram(env, method, payload) {
     const response = await fetch(
         `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`,
@@ -168,45 +170,86 @@ export async function sendChatAction(env, chatId, action = "typing") {
 }
 
 /**
- * Synchronize Telegram Bot Commands with role-based scoping:
+ * Generates the appropriate Telegram Bot Command list according to enabled feature permissions.
+ */
+export function getUserCommandList(permissions, isBoss = false) {
+    const hasPerm = (feat) => isBoss || hasUserPermission(feat, permissions, isBoss);
+
+    const commands = [
+        { command: "hub", description: "🏠 Open Command Center" }
+    ];
+
+    if (isBoss) {
+        commands.push({ command: "users", description: "👥 Manage Guests & Approvals" });
+    }
+
+    if (hasPerm("ai_dialog")) {
+        commands.push({ command: "search", description: "🌐 Live Google Search Grounding" });
+    }
+
+    if (hasPerm("finance")) {
+        commands.push(
+            { command: "today", description: "📊 Today Expenses & Balance" },
+            { command: "summary", description: "💳 Monthly Spending Summary" }
+        );
+    }
+
+    if (hasPerm("tasks")) {
+        commands.push({ command: "tasks", description: "📋 Today Completed Tasks" });
+    }
+
+    if (hasPerm("ai_dialog")) {
+        commands.push({ command: "voice", description: "🎙️ Voice Modes & Settings" });
+    }
+
+    commands.push(
+        { command: "settings", description: "⚙️ Currency & Budget Settings" },
+        { command: "help", description: "💡 Quick Guide & Shortcuts" }
+    );
+
+    return commands;
+}
+
+/**
+ * Synchronize Telegram Bot commands specifically scoped for an individual user chat.
+ * Dynamically includes only the commands corresponding to their enabled features.
+ */
+export async function syncUserBotCommands(env, userId, permissions, role = "guest") {
+    if (!userId || !env?.TELEGRAM_BOT_TOKEN) return false;
+    const isBoss = role === "owner" || isOwner(userId, env);
+    const commands = getUserCommandList(permissions, isBoss);
+
+    try {
+        await telegram(env, "setMyCommands", {
+            commands,
+            scope: { type: "chat", chat_id: Number(userId) || userId }
+        });
+        return true;
+    } catch (e) {
+        console.warn(`Failed to sync commands for user ${userId}:`, e.message);
+        return false;
+    }
+}
+
+/**
+ * Synchronize Telegram Bot Commands with role-based and user-specific scoping:
  * - Default / All Private Chats scope: guests only see public commands (excludes /users)
- * - Boss chat scope: includes admin commands (/users)
+ * - Individual Active Users: dynamically scoped to their specific enabled features
+ * - Boss chat scope: includes admin commands (/users) and all features
  */
 export async function syncBotCommands(env) {
     const ownerId = String(env?.OWNER_ID || env?.OWNER_TELEGRAM_ID || "849550186").trim();
 
-    const guestCommands = [
-        { command: "hub", description: "🏠 Open Command Center" },
-        { command: "search", description: "🌐 Live Google Search Grounding" },
-        { command: "today", description: "📊 Today Expenses & Balance" },
-        { command: "summary", description: "💳 Monthly Spending Summary" },
-        { command: "tasks", description: "📋 Today Completed Tasks" },
-        { command: "briefing", description: "🛡️ Morning Briefing & Status" },
-        { command: "voice", description: "🎙️ Voice Modes & Settings" },
-        { command: "settings", description: "⚙️ Currency & Budget Settings" },
-        { command: "help", description: "💡 Quick Guide & Shortcuts" }
-    ];
-
-    const bossCommands = [
-        { command: "hub", description: "🏠 Open Command Center" },
-        { command: "users", description: "👥 Manage Guests & Approvals" },
-        { command: "search", description: "🌐 Live Google Search Grounding" },
-        { command: "today", description: "📊 Today Expenses & Balance" },
-        { command: "summary", description: "💳 Monthly Spending Summary" },
-        { command: "tasks", description: "📋 Today Completed Tasks" },
-        { command: "briefing", description: "🛡️ Morning Briefing & Status" },
-        { command: "voice", description: "🎙️ Voice Modes & Settings" },
-        { command: "settings", description: "⚙️ Currency & Budget Settings" },
-        { command: "help", description: "💡 Quick Guide & Shortcuts" }
-    ];
+    const fallbackGuestCommands = getUserCommandList("finance,tasks,reminders,ai_dialog", false);
+    const bossCommands = getUserCommandList("all", true);
 
     await telegram(env, "setMyCommands", {
-        commands: guestCommands,
+        commands: fallbackGuestCommands,
         scope: { type: "default" }
     });
 
     await telegram(env, "setMyCommands", {
-        commands: guestCommands,
+        commands: fallbackGuestCommands,
         scope: { type: "all_private_chats" }
     });
 
@@ -217,8 +260,22 @@ export async function syncBotCommands(env) {
         });
     }
 
+    // Sync each active user individually from DB if available
+    if (env?.DB) {
+        try {
+            const { results } = await env.DB.prepare(
+                "SELECT user_id, role, permissions FROM authorized_users WHERE status = 'active'"
+            ).all();
+            if (results && results.length > 0) {
+                for (const u of results) {
+                    await syncUserBotCommands(env, u.user_id, u.permissions, u.role);
+                }
+            }
+        } catch (_) {}
+    }
+
     return {
-        guestCommandsCount: guestCommands.length,
+        guestCommandsCount: fallbackGuestCommands.length,
         bossCommandsCount: bossCommands.length,
         ownerId
     };

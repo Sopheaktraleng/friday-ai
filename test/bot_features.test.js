@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { GEMINI_MODELS, isUserAuthorized, isUserAuthorizedAsync, isOwner, OWNER_USER_ID, getAllowedUserIds, DEFAULT_ALLOWED_USERS } from "../src/config/constants.js";
-import { addOrUpdateAuthorizedUser, listAuthorizedUsers, setAuthorizedUserStatus, getBudgetStatus, searchLedger, addExpenseRecord } from "../src/db/queries.js";
+import { GEMINI_MODELS, isUserAuthorized, isUserAuthorizedAsync, isOwner, OWNER_USER_ID, getAllowedUserIds, DEFAULT_ALLOWED_USERS, hasUserPermission, formatUserPermissionsSummary } from "../src/config/constants.js";
+import { addOrUpdateAuthorizedUser, listAuthorizedUsers, setAuthorizedUserStatus, getBudgetStatus, searchLedger, addExpenseRecord, updateUserPermissions, toggleUserPermission, getAuthorizedUser } from "../src/db/queries.js";
 import { normalizeReminderTime } from "../src/utils/time.js";
 import { isCompoundOrMultiAction, isRealTimeSearchQuery, isConversationalOrCorrection } from "../src/utils/natural.js";
 import { buildSmartLocalFallback, handleAiCopilotQuery } from "../src/modules/copilot/handler.js";
@@ -9,10 +9,10 @@ import { ensureTables, resetTablesEnsuredForTest } from "../src/db/schema.js";
 import { handleMessage, handleRealTimeSearchCommand } from "../src/handlers/message.js";
 import worker from "../src/worker.js";
 import { handleCallback } from "../src/handlers/callback.js";
-import { answerCallback, syncBotCommands } from "../src/services/telegram.js";
+import { answerCallback, syncBotCommands, syncUserBotCommands, getUserCommandList } from "../src/services/telegram.js";
 import { sendRemindersMenu, sendPromptAddReminder, sendReminderTimeMenu, sendFocusMenu } from "../src/modules/reminders/views.js";
 import { parseReminderInput } from "../src/modules/reminders/commands.js";
-import { sendMainHub, sendSettingsMenu, sendHelpMessage } from "../src/modules/hub/views.js";
+import { sendMainHub, sendSettingsMenu, sendHelpMessage, sendGuestPermissionsMenu } from "../src/modules/hub/views.js";
 import { sendFinanceHub, sendCategoryPicker, sendTransactions } from "../src/modules/finance/views.js";
 import { handleAddWorkLogCommand, handleListTodayTasksCommand } from "../src/modules/work/commands.js";
 
@@ -1573,8 +1573,8 @@ describe("Bot Improvements & Stability", () => {
             };
 
             const res = await syncBotCommands(mockEnv);
-            expect(res.guestCommandsCount).toBe(9);
-            expect(res.bossCommandsCount).toBe(10);
+            expect(res.guestCommandsCount).toBe(8);
+            expect(res.bossCommandsCount).toBe(9);
 
             expect(fetchSpy).toHaveBeenCalledTimes(3);
 
@@ -1623,6 +1623,238 @@ describe("Bot Improvements & Stability", () => {
             const bossBody = JSON.parse(fetchSpy.mock.calls[1][1].body);
             expect(bossBody.text).toContain("/users");
             expect(bossBody.text).toContain("Dynamic user access matrix");
+
+            fetchSpy.mockRestore();
+        });
+    });
+
+    describe("Granular Guest Feature Permissions", () => {
+        it("hasUserPermission should correctly evaluate permissions for Boss vs Guest", () => {
+            // Boss always has permission regardless of string
+            expect(hasUserPermission("finance", "", true)).toBe(true);
+            expect(hasUserPermission("tasks", "", true)).toBe(true);
+            expect(hasUserPermission("reminders", "", true)).toBe(true);
+            expect(hasUserPermission("ai_dialog", "", true)).toBe(true);
+
+            // Guest with finance only
+            const financeOnlyGuest = { role: "guest", permissions: "finance" };
+            expect(hasUserPermission("finance", financeOnlyGuest, false)).toBe(true);
+            expect(hasUserPermission("tasks", financeOnlyGuest, false)).toBe(false);
+            expect(hasUserPermission("reminders", financeOnlyGuest, false)).toBe(false);
+            expect(hasUserPermission("ai_dialog", financeOnlyGuest, false)).toBe(false);
+
+            // Guest with finance and tasks
+            const financeTasksGuest = "finance,tasks";
+            expect(hasUserPermission("finance", financeTasksGuest)).toBe(true);
+            expect(hasUserPermission("tasks", financeTasksGuest)).toBe(true);
+            expect(hasUserPermission("reminders", financeTasksGuest)).toBe(false);
+
+            // Default fallback
+            expect(hasUserPermission("finance", "")).toBe(true);
+            expect(hasUserPermission("tasks", "")).toBe(true);
+        });
+
+        it("formatUserPermissionsSummary should format icons cleanly", () => {
+            expect(formatUserPermissionsSummary("finance")).toBe("💳 Finance");
+            expect(formatUserPermissionsSummary("finance,tasks")).toBe("💳 Finance | 📋 Tasks");
+            expect(formatUserPermissionsSummary("")).toContain("💳 Finance");
+        });
+
+        it("handleMessage should block restricted features for guests and allow permitted ones", async () => {
+            const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+                Promise.resolve(new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }))
+            );
+
+            const mockDb = {
+                prepare: vi.fn().mockImplementation((query) => {
+                    return {
+                        bind: vi.fn().mockImplementation((...args) => {
+                            return {
+                                first: vi.fn().mockImplementation(async () => {
+                                    if (query.includes("FROM authorized_users")) {
+                                        return {
+                                            user_id: "777888",
+                                            first_name: "Sarah",
+                                            role: "guest",
+                                            status: "active",
+                                            permissions: "finance" // ONLY FINANCE!
+                                        };
+                                    }
+                                    if (query.includes("FROM user_settings")) {
+                                        return { display_currency: "USD" };
+                                    }
+                                    return null;
+                                }),
+                                run: vi.fn().mockResolvedValue({ meta: { last_row_id: 101, changes: 1 } }),
+                                all: vi.fn().mockResolvedValue({ results: [] })
+                            };
+                        })
+                    };
+                })
+            };
+
+            const mockEnv = {
+                DB: mockDb,
+                TELEGRAM_BOT_TOKEN: "mock_token",
+                OWNER_ID: "849550186"
+            };
+
+            const guestUser = { id: 777888, first_name: "Sarah" };
+
+            // 1. Guest attempts /tasks -> Should be restricted!
+            await handleMessage({ chat: { id: 777888, type: "private" }, from: guestUser, text: "/tasks" }, mockEnv, "https://example.com");
+            const taskCall = fetchSpy.mock.calls[fetchSpy.mock.calls.length - 1];
+            const taskBody = JSON.parse(taskCall[1].body);
+            expect(taskBody.text).toContain("Feature Restricted");
+            expect(taskBody.text).toContain("Task & Work Logging");
+
+            // 2. Guest attempts done writing report -> Should be restricted!
+            await handleMessage({ chat: { id: 777888, type: "private" }, from: guestUser, text: "done wrote annual report" }, mockEnv, "https://example.com");
+            const doneCall = fetchSpy.mock.calls[fetchSpy.mock.calls.length - 1];
+            const doneBody = JSON.parse(doneCall[1].body);
+            expect(doneBody.text).toContain("Feature Restricted");
+            expect(doneBody.text).toContain("Task & Work Logging");
+
+            // 3. Guest attempts remind 17:00 sync -> Should be restricted!
+            await handleMessage({ chat: { id: 777888, type: "private" }, from: guestUser, text: "remind 17:00 sync" }, mockEnv, "https://example.com");
+            const remCall = fetchSpy.mock.calls[fetchSpy.mock.calls.length - 1];
+            const remBody = JSON.parse(remCall[1].body);
+            expect(remBody.text).toContain("Feature Restricted");
+            expect(remBody.text).toContain("Reminders & Alarms");
+
+            // 4. Guest logs expense '5 coffee' -> Should SUCCEED since finance is enabled!
+            await handleMessage({ chat: { id: 777888, type: "private" }, from: guestUser, text: "5 coffee" }, mockEnv, "https://example.com");
+            const expCall = fetchSpy.mock.calls[fetchSpy.mock.calls.length - 1];
+            const expBody = JSON.parse(expCall[1].body);
+            expect(expBody.text).not.toContain("Feature Restricted");
+            expect(expBody.text).toContain("Expense Recorded");
+
+            fetchSpy.mockRestore();
+        });
+
+        it("handleCallback should handle guest permission toggles and presets", async () => {
+            const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+                Promise.resolve(new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }))
+            );
+
+            let savedPerms = "finance,tasks,reminders,ai_dialog";
+            const mockDb = {
+                batch: vi.fn().mockResolvedValue([]),
+                prepare: vi.fn().mockImplementation((query) => {
+                    return {
+                        bind: vi.fn().mockImplementation((...args) => {
+                            return {
+                                first: vi.fn().mockImplementation(async () => {
+                                    return {
+                                        user_id: "777888",
+                                        first_name: "Sarah",
+                                        role: "guest",
+                                        status: "active",
+                                        permissions: savedPerms
+                                    };
+                                }),
+                                run: vi.fn().mockImplementation(async () => {
+                                    if (query.includes("UPDATE authorized_users SET permissions")) {
+                                        savedPerms = args[0];
+                                    }
+                                    return { meta: { changes: 1 } };
+                                }),
+                                all: vi.fn().mockResolvedValue({ results: [] })
+                            };
+                        })
+                    };
+                })
+            };
+
+            const mockEnv = {
+                DB: mockDb,
+                TELEGRAM_BOT_TOKEN: "mock_token",
+                OWNER_ID: "849550186"
+            };
+
+            // Boss opens guest permission menu
+            await handleCallback({
+                id: "cb_1",
+                data: "manage_guest:777888",
+                from: { id: 849550186 },
+                message: { chat: { id: 849550186 }, message_id: 111 }
+            }, mockEnv, "https://example.com");
+
+            const menuCall = fetchSpy.mock.calls[fetchSpy.mock.calls.length - 1];
+            const menuBody = JSON.parse(menuCall[1].body);
+            expect(menuBody.text).toContain("Guest Feature Manager");
+            expect(menuBody.text).toContain("Sarah");
+
+            // Boss applies finance_only preset
+            await handleCallback({
+                id: "cb_2",
+                data: "preset_perm:777888:finance_only",
+                from: { id: 849550186 },
+                message: { chat: { id: 849550186 }, message_id: 111 }
+            }, mockEnv, "https://example.com");
+
+            expect(savedPerms).toBe("finance");
+
+            // Guest tries to access tasks_today callback -> blocked!
+            await handleCallback({
+                id: "cb_3",
+                data: "tasks_today",
+                from: { id: 777888 },
+                message: { chat: { id: 777888 }, message_id: 222 }
+            }, mockEnv, "https://example.com");
+
+            // Check answerCallback alerted restriction
+            const alertCall = fetchSpy.mock.calls[fetchSpy.mock.calls.length - 1];
+            const alertBody = JSON.parse(alertCall[1].body);
+            expect(alertBody.text).toContain("disabled for your guest account");
+
+            fetchSpy.mockRestore();
+        });
+
+        it("getUserCommandList and syncUserBotCommands should dynamically scope command popups per user", async () => {
+            // 1. Finance-only guest command list
+            const financeCmds = getUserCommandList("finance", false);
+            const financeCmdNames = financeCmds.map(c => c.command);
+            expect(financeCmdNames).toEqual(["hub", "today", "summary", "settings", "help"]);
+            expect(financeCmdNames).not.toContain("tasks");
+            expect(financeCmdNames).not.toContain("search");
+            expect(financeCmdNames).not.toContain("briefing");
+            expect(financeCmdNames).not.toContain("voice");
+            expect(financeCmdNames).not.toContain("users");
+
+            // 2. Finance + Tasks guest command list
+            const ftCmds = getUserCommandList("finance,tasks", false);
+            const ftCmdNames = ftCmds.map(c => c.command);
+            expect(ftCmdNames).toContain("today");
+            expect(ftCmdNames).toContain("tasks");
+            expect(ftCmdNames).not.toContain("search");
+            expect(ftCmdNames).not.toContain("briefing");
+
+            // 3. Boss command list
+            const bossCmds = getUserCommandList("all", true);
+            const bossCmdNames = bossCmds.map(c => c.command);
+            expect(bossCmdNames).toContain("users");
+            expect(bossCmdNames).toContain("search");
+            expect(bossCmdNames).toContain("tasks");
+
+            // 4. Test API delivery with syncUserBotCommands
+            const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+                Promise.resolve(new Response(JSON.stringify({ ok: true, result: true }), { status: 200 }))
+            );
+
+            const mockEnv = {
+                TELEGRAM_BOT_TOKEN: "mock_token",
+                OWNER_ID: "849550186"
+            };
+
+            const success = await syncUserBotCommands(mockEnv, 8250070483, "finance", "guest");
+            expect(success).toBe(true);
+            expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+            const callBody = JSON.parse(fetchSpy.mock.calls[0][1].body);
+            expect(callBody.scope).toEqual({ type: "chat", chat_id: 8250070483 });
+            const deliveredCommands = callBody.commands.map(c => c.command);
+            expect(deliveredCommands).toEqual(["hub", "today", "summary", "settings", "help"]);
 
             fetchSpy.mockRestore();
         });

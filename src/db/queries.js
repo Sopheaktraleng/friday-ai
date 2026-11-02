@@ -594,12 +594,10 @@ export async function claimDailyBroadcast(db, userId, type, date) {
 export async function getAuthorizedUser(db, userId) {
     if (!db || !userId) return null;
     try {
-        return await db
-            .prepare("SELECT user_id, username, first_name, role, status, created_at, approved_by FROM authorized_users WHERE user_id = ?")
-            .bind(String(userId))
-            .first();
+        const prep = db.prepare("SELECT user_id, username, first_name, role, status, permissions, created_at, approved_by FROM authorized_users WHERE user_id = ?");
+        const bound = typeof prep?.bind === "function" ? prep.bind(String(userId)) : prep;
+        return typeof bound?.first === "function" ? await bound.first() : null;
     } catch (e) {
-        console.warn("getAuthorizedUser error:", e.message);
         return null;
     }
 }
@@ -608,7 +606,7 @@ export async function listAuthorizedUsers(db) {
     if (!db) return [];
     try {
         const { results } = await db
-            .prepare("SELECT user_id, username, first_name, role, status, created_at, approved_by FROM authorized_users ORDER BY role DESC, created_at ASC")
+            .prepare("SELECT user_id, username, first_name, role, status, permissions, created_at, approved_by FROM authorized_users ORDER BY role DESC, created_at ASC")
             .all();
         return results || [];
     } catch (e) {
@@ -617,27 +615,64 @@ export async function listAuthorizedUsers(db) {
     }
 }
 
-export async function addOrUpdateAuthorizedUser(db, { userId, username = "", firstName = "", role = "guest", status = "active", approvedBy = "owner" }) {
+export async function addOrUpdateAuthorizedUser(db, { userId, username = "", firstName = "", role = "guest", status = "active", permissions = "finance,tasks,reminders,ai_dialog", approvedBy = "owner" }) {
     if (!db || !userId) return false;
     try {
         await db
             .prepare(
-                `INSERT INTO authorized_users (user_id, username, first_name, role, status, approved_by)
-                 VALUES (?, ?, ?, ?, ?, ?)
+                `INSERT INTO authorized_users (user_id, username, first_name, role, status, permissions, approved_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT(user_id) DO UPDATE SET
                     username = excluded.username,
                     first_name = excluded.first_name,
                     role = excluded.role,
                     status = excluded.status,
+                    permissions = COALESCE(excluded.permissions, authorized_users.permissions),
                     approved_by = excluded.approved_by`
             )
-            .bind(String(userId), username, firstName, role, status, approvedBy)
+            .bind(String(userId), username, firstName, role, status, permissions, approvedBy)
             .run();
         return true;
     } catch (e) {
         console.error("addOrUpdateAuthorizedUser error:", e);
         return false;
     }
+}
+
+export async function updateUserPermissions(db, userId, permissions) {
+    if (!db || !userId) return false;
+    try {
+        await db
+            .prepare("UPDATE authorized_users SET permissions = ? WHERE user_id = ?")
+            .bind(permissions, String(userId))
+            .run();
+        return true;
+    } catch (e) {
+        console.error("updateUserPermissions error:", e);
+        return false;
+    }
+}
+
+export async function toggleUserPermission(db, userId, feature) {
+    if (!db || !userId || !feature) return null;
+    const user = await getAuthorizedUser(db, userId);
+    if (!user) return null;
+
+    const currentPerms = (user.permissions || "finance,tasks,reminders,ai_dialog")
+        .split(",")
+        .map(p => p.trim().toLowerCase())
+        .filter(Boolean);
+
+    let nextPerms;
+    if (currentPerms.includes(feature.toLowerCase())) {
+        nextPerms = currentPerms.filter(p => p !== feature.toLowerCase());
+    } else {
+        nextPerms = [...currentPerms, feature.toLowerCase()];
+    }
+
+    const newPermString = nextPerms.join(",");
+    await updateUserPermissions(db, userId, newPermString);
+    return newPermString;
 }
 
 export async function setAuthorizedUserStatus(db, userId, status) {

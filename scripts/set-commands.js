@@ -28,30 +28,32 @@ if (!token) {
     process.exit(1);
 }
 
-export const GUEST_COMMANDS = [
-    { command: "hub", description: "🏠 Open Command Center" },
-    { command: "search", description: "🌐 Live Google Search Grounding" },
-    { command: "today", description: "📊 Today Expenses & Balance" },
-    { command: "summary", description: "💳 Monthly Spending Summary" },
-    { command: "tasks", description: "📋 Today Completed Tasks" },
-    { command: "briefing", description: "🛡️ Morning Briefing & Status" },
-    { command: "voice", description: "🎙️ Voice Modes & Settings" },
-    { command: "settings", description: "⚙️ Currency & Budget Settings" },
-    { command: "help", description: "💡 Quick Guide & Shortcuts" }
-];
+export function getUserCommandList(permissions, isBoss = false) {
+    const permList = (permissions || "finance,tasks,reminders,ai_dialog").split(",").map(p => p.trim().toLowerCase());
+    const hasPerm = (f) => isBoss || permList.includes(f) || permList.includes("all") || permList.includes("*");
 
-export const BOSS_COMMANDS = [
-    { command: "hub", description: "🏠 Open Command Center" },
-    { command: "users", description: "👥 Manage Guests & Approvals" },
-    { command: "search", description: "🌐 Live Google Search Grounding" },
-    { command: "today", description: "📊 Today Expenses & Balance" },
-    { command: "summary", description: "💳 Monthly Spending Summary" },
-    { command: "tasks", description: "📋 Today Completed Tasks" },
-    { command: "briefing", description: "🛡️ Morning Briefing & Status" },
-    { command: "voice", description: "🎙️ Voice Modes & Settings" },
-    { command: "settings", description: "⚙️ Currency & Budget Settings" },
-    { command: "help", description: "💡 Quick Guide & Shortcuts" }
-];
+    const commands = [{ command: "hub", description: "🏠 Open Command Center" }];
+    if (isBoss) commands.push({ command: "users", description: "👥 Manage Guests & Approvals" });
+    if (hasPerm("ai_dialog")) commands.push({ command: "search", description: "🌐 Live Google Search Grounding" });
+    if (hasPerm("finance")) {
+        commands.push(
+            { command: "today", description: "📊 Today Expenses & Balance" },
+            { command: "summary", description: "💳 Monthly Spending Summary" }
+        );
+    }
+    if (hasPerm("tasks")) commands.push({ command: "tasks", description: "📋 Today Completed Tasks" });
+    if (hasPerm("ai_dialog")) {
+        commands.push({ command: "voice", description: "🎙️ Voice Modes & Settings" });
+    }
+    commands.push(
+        { command: "settings", description: "⚙️ Currency & Budget Settings" },
+        { command: "help", description: "💡 Quick Guide & Shortcuts" }
+    );
+    return commands;
+}
+
+export const GUEST_COMMANDS = getUserCommandList("finance,tasks,reminders,ai_dialog", false);
+export const BOSS_COMMANDS = getUserCommandList("all", true);
 
 async function setCommands(commands, scope, label) {
     const res = await fetch(`https://api.telegram.org/bot${token}/setMyCommands`, {

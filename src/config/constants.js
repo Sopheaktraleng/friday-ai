@@ -97,3 +97,50 @@ export async function isUserAuthorizedAsync(db, userId, env = {}) {
     }
     return false;
 }
+
+export const AVAILABLE_FEATURES = [
+    { id: "finance", name: "Finance Hub & Logging", icon: "💳" },
+    { id: "tasks", name: "Task & Work Logging", icon: "📋" },
+    { id: "reminders", name: "Reminders & Alarms", icon: "⏰" },
+    { id: "ai_dialog", name: "AI Assistant & Dialog", icon: "🤖" }
+];
+
+export const DEFAULT_GUEST_PERMISSIONS = "finance,tasks,reminders,ai_dialog";
+
+/**
+ * Checks whether a user has permission to use a specific feature module.
+ * Boss (Owner) always has permission for all features.
+ * Guests check their comma-separated permissions string.
+ */
+export function hasUserPermission(feature, userOrPermissions, isBoss = false) {
+    if (isBoss) return true;
+    if (!feature) return true;
+
+    let permStr = "";
+    if (typeof userOrPermissions === "string") {
+        permStr = userOrPermissions;
+    } else if (userOrPermissions && typeof userOrPermissions === "object") {
+        if (userOrPermissions.role === "owner") return true;
+        permStr = userOrPermissions.permissions || "";
+    }
+
+    if (!permStr || !permStr.trim()) {
+        permStr = DEFAULT_GUEST_PERMISSIONS;
+    }
+
+    const parts = permStr.split(",").map(p => p.trim().toLowerCase());
+    return parts.includes(feature.toLowerCase()) || parts.includes("all") || parts.includes("*");
+}
+
+/**
+ * Returns a human-friendly list of active feature icons/names for a user.
+ */
+export function formatUserPermissionsSummary(permissionsStr) {
+    const raw = (permissionsStr || DEFAULT_GUEST_PERMISSIONS).split(",").map(p => p.trim().toLowerCase());
+    const features = [];
+    if (raw.includes("finance")) features.push("💳 Finance");
+    if (raw.includes("tasks")) features.push("📋 Tasks");
+    if (raw.includes("reminders")) features.push("⏰ Reminders");
+    if (raw.includes("ai_dialog")) features.push("🤖 AI Dialog");
+    return features.length > 0 ? features.join(" | ") : "🚫 No Features Enabled";
+}

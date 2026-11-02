@@ -1,4 +1,4 @@
-import { TIME_ZONE, EXCHANGE_RATE, isUserAuthorized, isUserAuthorizedAsync, isOwner, OWNER_USER_ID } from "../config/constants.js";
+import { TIME_ZONE, EXCHANGE_RATE, isUserAuthorized, isUserAuthorizedAsync, isOwner, OWNER_USER_ID, hasUserPermission } from "../config/constants.js";
 import { today, currentTime } from "../utils/time.js";
 import { formatMoney, cleanMd, capitalize } from "../utils/format.js";
 import { ensureTables } from "../db/schema.js";
@@ -17,14 +17,17 @@ import {
     getLastModelChatMessage,
     addOrUpdateAuthorizedUser,
     setAuthorizedUserStatus,
-    getAuthorizedUser
+    getAuthorizedUser,
+    updateUserPermissions,
+    toggleUserPermission
 } from "../db/queries.js";
 import {
     telegram,
     sendMessage,
     answerCallback,
     safeEditOrSendMessage,
-    sendTelegramVoice
+    sendTelegramVoice,
+    syncUserBotCommands
 } from "../services/telegram.js";
 import { generateSpeechAudio } from "../services/ai.js";
 import {
@@ -32,7 +35,8 @@ import {
     sendMainMenu,
     sendSettingsMenu,
     sendHelpMessage,
-    sendUserManagementMenu
+    sendUserManagementMenu,
+    sendGuestPermissionsMenu
 } from "../modules/hub/views.js";
 import {
     sendFinanceHub,
@@ -109,6 +113,9 @@ export async function handleCallback(callback, env, origin) {
     data.startsWith("approve_user:") ||
     data.startsWith("deny_user:") ||
     data.startsWith("revoke_user:") ||
+    data.startsWith("manage_guest:") ||
+    data.startsWith("toggle_perm:") ||
+    data.startsWith("preset_perm:") ||
     data.startsWith("focus_start:") ||
     data.startsWith("remind_toggle") || 
     data.startsWith("remind_quick_timer:") || 
@@ -128,6 +135,12 @@ export async function handleCallback(callback, env, origin) {
     }
 
     if (!chatId) return;
+
+    const isBoss = isOwner(userId, env);
+    let guestUser = null;
+    if (!isBoss) {
+        guestUser = await getAuthorizedUser(env.DB, userId);
+    }
 
     // --- Dynamic User Access Management (Boss & Guest Workflow) ---
     if (data.startsWith("request_access")) {
@@ -197,6 +210,8 @@ export async function handleCallback(callback, env, origin) {
             status: "active",
             approvedBy: userId
         });
+
+        await syncUserBotCommands(env, targetId, "finance,tasks,reminders,ai_dialog", "guest");
 
         await answerCallback(env, callback.id, { text: `✅ ${targetName} approved as Guest!` });
 
@@ -279,9 +294,92 @@ export async function handleCallback(callback, env, origin) {
 
         const targetId = data.replace("revoke_user:", "").trim();
         await setAuthorizedUserStatus(env.DB, targetId, "revoked");
+        try {
+            await telegram(env, "deleteMyCommands", { scope: { type: "chat", chat_id: Number(targetId) || targetId } });
+        } catch (_) {}
         await answerCallback(env, callback.id, { text: `🚫 Revoked access for ${targetId}`, show_alert: true });
         await sendUserManagementMenu(env, chatId, userId, messageId);
         return;
+    }
+
+    if (data.startsWith("manage_guest:")) {
+        if (!isBoss) {
+            await answerCallback(env, callback.id, { text: "⛔ User management is restricted to Boss.", show_alert: true });
+            return;
+        }
+        const targetId = data.replace("manage_guest:", "").trim();
+        await sendGuestPermissionsMenu(env, chatId, userId, targetId, messageId);
+        return;
+    }
+
+    if (data.startsWith("toggle_perm:")) {
+        if (!isBoss) {
+            await answerCallback(env, callback.id, { text: "⛔ Only Boss can toggle permissions.", show_alert: true });
+            return;
+        }
+        const [, targetId, feature] = data.split(":");
+        const newPerms = await toggleUserPermission(env.DB, targetId, feature);
+        if (newPerms !== null) {
+            await syncUserBotCommands(env, targetId, newPerms, "guest");
+        }
+        await answerCallback(env, callback.id, { text: `Toggled ${feature} permission!` });
+        await sendGuestPermissionsMenu(env, chatId, userId, targetId, messageId);
+        return;
+    }
+
+    if (data.startsWith("preset_perm:")) {
+        if (!isBoss) {
+            await answerCallback(env, callback.id, { text: "⛔ Only Boss can apply presets.", show_alert: true });
+            return;
+        }
+        const [, targetId, preset] = data.split(":");
+        const newPerms = preset === "finance_only" ? "finance" : "finance,tasks,reminders,ai_dialog";
+        await updateUserPermissions(env.DB, targetId, newPerms);
+        await syncUserBotCommands(env, targetId, newPerms, "guest");
+        await answerCallback(env, callback.id, { text: preset === "finance_only" ? "⚡ Preset: Finance Only applied!" : "🌟 All features enabled!" });
+        await sendGuestPermissionsMenu(env, chatId, userId, targetId, messageId);
+        return;
+    }
+
+    // Feature Permission Enforcements for Guests
+    if (
+        data === "finance_hub" ||
+        data === "view_transactions" ||
+        data.startsWith("quick_expense:") ||
+        data.startsWith("quick_income:") ||
+        data.startsWith("log_amt:") ||
+        data === "undo_tx" ||
+        data.startsWith("relog_tx:") ||
+        data.startsWith("relog_def:") ||
+        data.startsWith("save_scan:") ||
+        data.startsWith("discard_scan:") ||
+        data.startsWith("import_all_stmt:")
+    ) {
+        if (!isBoss && !hasUserPermission("finance", guestUser)) {
+            await answerCallback(env, callback.id, { text: "🔒 Finance is disabled for your guest account.", show_alert: true });
+            return;
+        }
+    }
+
+    if (data === "tasks_today" || data === "work_hub" || data === "work_today" || data.startsWith("work_del:")) {
+        if (!isBoss && !hasUserPermission("tasks", guestUser)) {
+            await answerCallback(env, callback.id, { text: "🔒 Task logging is disabled for your guest account.", show_alert: true });
+            return;
+        }
+    }
+
+    if (data === "reminders" || data === "add_reminder" || data.startsWith("rem_") || data.startsWith("remind_") || data.startsWith("focus_")) {
+        if (!isBoss && !hasUserPermission("reminders", guestUser)) {
+            await answerCallback(env, callback.id, { text: "🔒 Reminders are disabled for your guest account.", show_alert: true });
+            return;
+        }
+    }
+
+    if (data === "daily_briefing" || data === "friday_briefing" || data === "speak_status" || data === "copilot_help") {
+        if (!isBoss && !hasUserPermission("ai_dialog", guestUser)) {
+            await answerCallback(env, callback.id, { text: "🔒 AI Dialog is disabled for your guest account.", show_alert: true });
+            return;
+        }
     }
 
     // --- Main Hub, Finance Hub & Settings ---
