@@ -123,6 +123,10 @@ export async function handleListTodayTasksCommand(env, chatId, userId, messageId
         ]);
     }
     inline_keyboard.push([
+        { text: "📜 History", callback_data: "tasks_history:1" },
+        { text: "📊 Month Stats", callback_data: "tasks_month_stats" }
+    ]);
+    inline_keyboard.push([
         { text: "🏠 Main Hub", callback_data: "hub" }
     ]);
 
@@ -131,5 +135,155 @@ export async function handleListTodayTasksCommand(env, chatId, userId, messageId
         reply_markup: {
             inline_keyboard
         }
+    });
+}
+
+/**
+ * Paginated task history viewer.
+ */
+export async function handleListTasksHistoryCommand(env, chatId, userId, page = 1, messageId = null) {
+    await ensureTables(env.DB);
+    const pageSize = 8;
+    const offset = (Math.max(1, page) - 1) * pageSize;
+
+    const [totalRow, rows] = await Promise.all([
+        env.DB.prepare("SELECT COUNT(*) as count FROM work_logs WHERE user_id = ?").bind(userId).first(),
+        env.DB.prepare(
+            "SELECT id, date, time, content, category FROM work_logs WHERE user_id = ? ORDER BY date DESC, time DESC, id DESC LIMIT ? OFFSET ?"
+        ).bind(userId, pageSize, offset).all()
+    ]);
+
+    const totalCount = totalRow?.count || 0;
+    const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+    const tasks = rows.results || [];
+
+    if (totalCount === 0 || tasks.length === 0) {
+        const emptyText = [
+            `📜 *Task History*`,
+            ``,
+            `_No tasks recorded in your history yet._`,
+            ``,
+            `_💡 Log anytime:_ \`done <task description>\``
+        ].join("\n");
+
+        const emptyKeyboard = [
+            [
+                { text: "📋 Today's Tasks", callback_data: "tasks_today" },
+                { text: "🏠 Main Hub", callback_data: "hub" }
+            ]
+        ];
+
+        await safeEditOrSendMessage(env, chatId, messageId, emptyText, {
+            parse_mode: "Markdown",
+            reply_markup: { inline_keyboard: emptyKeyboard }
+        });
+        return;
+    }
+
+    let currentDate = null;
+    const lines = [];
+
+    for (const t of tasks) {
+        if (t.date !== currentDate) {
+            currentDate = t.date;
+            lines.push(``, `📅 *${currentDate}*`);
+        }
+        const icon = getWorkCategoryIcon(t.category);
+        lines.push(`• \`${t.time}\` ${icon} ${t.content}`);
+    }
+
+    const text = [
+        `📜 *Task History* (Page ${page}/${totalPages})`,
+        `● *Total Accomplishments:* \`${totalCount} tasks\``,
+        ...lines
+    ].join("\n");
+
+    const inline_keyboard = [];
+
+    const paginationRow = [];
+    if (page > 1) {
+        paginationRow.push({ text: "‹ Newer", callback_data: `tasks_history:${page - 1}` });
+    }
+    if (page < totalPages) {
+        paginationRow.push({ text: "Older ›", callback_data: `tasks_history:${page + 1}` });
+    }
+    if (paginationRow.length > 0) {
+        inline_keyboard.push(paginationRow);
+    }
+
+    inline_keyboard.push([
+        { text: "📋 Today's Tasks", callback_data: "tasks_today" },
+        { text: "📊 Month Stats", callback_data: "tasks_month_stats" }
+    ]);
+    inline_keyboard.push([
+        { text: "🏠 Main Hub", callback_data: "hub" }
+    ]);
+
+    await safeEditOrSendMessage(env, chatId, messageId, text, {
+        parse_mode: "Markdown",
+        reply_markup: { inline_keyboard }
+    });
+}
+
+/**
+ * Monthly task analytics and category breakdown.
+ */
+export async function handleTasksMonthStatsCommand(env, chatId, userId, messageId = null) {
+    await ensureTables(env.DB);
+    const monthStr = monthPrefix();
+    const curMonthLabel = monthLabel();
+
+    const [totalRow, activeDaysRow, categoryRows] = await Promise.all([
+        env.DB.prepare(
+            "SELECT COUNT(*) as count FROM work_logs WHERE user_id = ? AND date LIKE ?"
+        ).bind(userId, `${monthStr}%`).first(),
+        env.DB.prepare(
+            "SELECT COUNT(DISTINCT date) as days FROM work_logs WHERE user_id = ? AND date LIKE ?"
+        ).bind(userId, `${monthStr}%`).first(),
+        env.DB.prepare(
+            "SELECT category, COUNT(*) as count FROM work_logs WHERE user_id = ? AND date LIKE ? GROUP BY category ORDER BY count DESC"
+        ).bind(userId, `${monthStr}%`).all()
+    ]);
+
+    const totalCount = totalRow?.count || 0;
+    const activeDays = activeDaysRow?.days || 0;
+    const velocity = activeDays > 0 ? (totalCount / activeDays).toFixed(1) : "0.0";
+
+    const cats = categoryRows.results || [];
+    let breakdownLines = [];
+    if (cats.length === 0) {
+        breakdownLines.push(`_No tasks logged this month yet._`);
+    } else {
+        breakdownLines = cats.map(c => {
+            const icon = getWorkCategoryIcon(c.category);
+            const pct = totalCount > 0 ? Math.round((c.count / totalCount) * 100) : 0;
+            return `${icon} *${c.category}:* \`${c.count}\` _(${pct}%)_`;
+        });
+    }
+
+    const text = [
+        `📊 *Task Insights* (${curMonthLabel})`,
+        ``,
+        `● *Total Logged:*  \`${totalCount} tasks\``,
+        `● *Active Days:*   \`${activeDays} workdays\``,
+        `● *Daily Pace:*    \`${velocity} tasks/day\``,
+        ``,
+        `*Category Breakdown:*`,
+        ...breakdownLines
+    ].join("\n");
+
+    const inline_keyboard = [
+        [
+            { text: "📋 Today's Tasks", callback_data: "tasks_today" },
+            { text: "📜 History", callback_data: "tasks_history:1" }
+        ],
+        [
+            { text: "🏠 Main Hub", callback_data: "hub" }
+        ]
+    ];
+
+    await safeEditOrSendMessage(env, chatId, messageId, text, {
+        parse_mode: "Markdown",
+        reply_markup: { inline_keyboard }
     });
 }

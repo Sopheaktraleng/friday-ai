@@ -66,7 +66,9 @@ import {
     handleStatementDiscard
 } from "../modules/finance/scanner.js";
 import {
-    handleListTodayTasksCommand
+    handleListTodayTasksCommand,
+    handleListTasksHistoryCommand,
+    handleTasksMonthStatsCommand
 } from "../modules/work/commands.js";
 import {
     sendPromptAddReminder,
@@ -361,7 +363,14 @@ export async function handleCallback(callback, env, origin) {
         }
     }
 
-    if (data === "tasks_today" || data === "work_hub" || data === "work_today" || data.startsWith("work_del:")) {
+    if (
+        data === "tasks_today" || 
+        data === "work_hub" || 
+        data === "work_today" || 
+        data.startsWith("work_del:") || 
+        data.startsWith("tasks_history:") || 
+        data === "tasks_month_stats"
+    ) {
         if (!isBoss && !hasUserPermission("tasks", guestUser)) {
             await answerCallback(env, callback.id, { text: "🔒 Task logging is disabled for your guest account.", show_alert: true });
             return;
@@ -401,6 +410,17 @@ export async function handleCallback(callback, env, origin) {
     // --- Work & Tasks Callbacks ---
     if (data === "tasks_today" || data === "work_hub" || data === "work_today") {
         await handleListTodayTasksCommand(env, chatId, userId, messageId);
+        return;
+    }
+
+    if (data.startsWith("tasks_history:")) {
+        const page = parseInt(data.slice(14), 10) || 1;
+        await handleListTasksHistoryCommand(env, chatId, userId, page, messageId);
+        return;
+    }
+
+    if (data === "tasks_month_stats") {
+        await handleTasksMonthStatsCommand(env, chatId, userId, messageId);
         return;
     }
 

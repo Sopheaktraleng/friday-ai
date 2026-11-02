@@ -14,7 +14,7 @@ import { sendRemindersMenu, sendPromptAddReminder, sendReminderTimeMenu, sendFoc
 import { parseReminderInput } from "../src/modules/reminders/commands.js";
 import { sendMainHub, sendSettingsMenu, sendHelpMessage, sendGuestPermissionsMenu } from "../src/modules/hub/views.js";
 import { sendFinanceHub, sendCategoryPicker, sendTransactions } from "../src/modules/finance/views.js";
-import { handleAddWorkLogCommand, handleListTodayTasksCommand } from "../src/modules/work/commands.js";
+import { handleAddWorkLogCommand, handleListTodayTasksCommand, handleListTasksHistoryCommand, handleTasksMonthStatsCommand } from "../src/modules/work/commands.js";
 
 describe("Bot Improvements & Stability", () => {
     describe("AI Configuration", () => {
@@ -362,11 +362,100 @@ describe("Bot Improvements & Stability", () => {
             expect(payload.text).toContain("Architecture review sync");
             expect(payload.text).toContain("12 tasks");
 
-            // Check buttons: Only Delete Last and Main Hub
+            // Check buttons: Delete Last, History, Month Stats, Main Hub
             const buttonTexts = payload.reply_markup.inline_keyboard.flat().map(b => b.text);
             expect(buttonTexts).toContain("🗑️ Delete Last Task");
+            expect(buttonTexts).toContain("📜 History");
+            expect(buttonTexts).toContain("📊 Month Stats");
             expect(buttonTexts).toContain("🏠 Main Hub");
             expect(buttonTexts).not.toContain("Daily Standup");
+
+            fetchSpy.mockRestore();
+        });
+
+        it("should render paginated task history with handleListTasksHistoryCommand", async () => {
+            const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+                new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 })
+            );
+
+            const mockDb = {
+                prepare: vi.fn().mockImplementation((query) => {
+                    return {
+                        bind: vi.fn().mockReturnValue({
+                            first: vi.fn().mockResolvedValue({ count: 15 }),
+                            all: vi.fn().mockResolvedValue({
+                                results: [
+                                    { id: 201, date: "2026-11-02", time: "11:00", content: "Fixed auth bug", category: "Bugfix" },
+                                    { id: 200, date: "2026-10-31", time: "16:00", content: "Architecture doc", category: "Documentation" }
+                                ]
+                            })
+                        })
+                    };
+                })
+            };
+
+            const mockEnv = { DB: mockDb, TELEGRAM_BOT_TOKEN: "mock_token" };
+            await handleListTasksHistoryCommand(mockEnv, 123456, "user_1", 1);
+
+            expect(fetchSpy).toHaveBeenCalled();
+            const payload = JSON.parse(fetchSpy.mock.calls[0][1].body);
+            expect(payload.text).toContain("Task History");
+            expect(payload.text).toContain("2026-11-02");
+            expect(payload.text).toContain("Fixed auth bug");
+            expect(payload.text).toContain("2026-10-31");
+            expect(payload.text).toContain("Architecture doc");
+
+            const buttonTexts = payload.reply_markup.inline_keyboard.flat().map(b => b.text);
+            expect(buttonTexts).toContain("Older ›");
+            expect(buttonTexts).toContain("📋 Today's Tasks");
+            expect(buttonTexts).toContain("📊 Month Stats");
+            expect(buttonTexts).toContain("🏠 Main Hub");
+
+            fetchSpy.mockRestore();
+        });
+
+        it("should render monthly category analytics with handleTasksMonthStatsCommand", async () => {
+            const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+                new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 })
+            );
+
+            const mockDb = {
+                prepare: vi.fn().mockImplementation((query) => {
+                    return {
+                        bind: vi.fn().mockReturnValue({
+                            first: vi.fn().mockImplementation(() => {
+                                if (query.includes("DISTINCT date")) {
+                                    return Promise.resolve({ days: 4 });
+                                }
+                                return Promise.resolve({ count: 12 });
+                            }),
+                            all: vi.fn().mockResolvedValue({
+                                results: [
+                                    { category: "Development", count: 6 },
+                                    { category: "Bugfix", count: 4 },
+                                    { category: "Meeting", count: 2 }
+                                ]
+                            })
+                        })
+                    };
+                })
+            };
+
+            const mockEnv = { DB: mockDb, TELEGRAM_BOT_TOKEN: "mock_token" };
+            await handleTasksMonthStatsCommand(mockEnv, 123456, "user_1");
+
+            expect(fetchSpy).toHaveBeenCalled();
+            const payload = JSON.parse(fetchSpy.mock.calls[0][1].body);
+            expect(payload.text).toContain("Task Insights");
+            expect(payload.text).toContain("Total Logged:");
+            expect(payload.text).toContain("12 tasks");
+            expect(payload.text).toContain("Development:");
+            expect(payload.text).toContain("Bugfix:");
+
+            const buttonTexts = payload.reply_markup.inline_keyboard.flat().map(b => b.text);
+            expect(buttonTexts).toContain("📋 Today's Tasks");
+            expect(buttonTexts).toContain("📜 History");
+            expect(buttonTexts).toContain("🏠 Main Hub");
 
             fetchSpy.mockRestore();
         });

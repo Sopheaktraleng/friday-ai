@@ -56,7 +56,9 @@ import {
 // Work & Tasks
 import {
     handleAddWorkLogCommand,
-    handleListTodayTasksCommand
+    handleListTodayTasksCommand,
+    handleListTasksHistoryCommand,
+    handleTasksMonthStatsCommand
 } from "../modules/work/commands.js";
 
 // Reminders
@@ -694,9 +696,18 @@ export async function handleMessage(message, env, origin) {
     }
 
     // 2. Work & Tasks Workspace
-    if (text === "/tasks" || text === "/task" || text === "/work" || text === "/worklog" || text === "/w") {
+    if (text.startsWith("/tasks") || text.startsWith("/task") || text.startsWith("/work") || text.startsWith("/worklog") || text === "/w") {
         if (!checkFeature("Tasks", "tasks")) {
             await sendFeatureRestricted(env, chatId, "Task & Work Logging", message.from);
+            return;
+        }
+        const lower = text.toLowerCase().trim();
+        if (lower.includes("history") || lower.includes("past") || lower.includes("all")) {
+            await handleListTasksHistoryCommand(env, chatId, userId, 1);
+            return;
+        }
+        if (lower.includes("stats") || lower.includes("summary") || lower.includes("month")) {
+            await handleTasksMonthStatsCommand(env, chatId, userId);
             return;
         }
         await handleListTodayTasksCommand(env, chatId, userId);
