@@ -351,6 +351,40 @@ describe("Core AI & Agentic Intelligence Adjustments", () => {
             const parsedStd = parseCopilotResponse(standardJson);
             expect(parsedStd.reply).toBe("Good morning Boss!");
         });
+
+        it("askAiCopilot dynamically routes between Fast Engine and Deep Thought Engine", async () => {
+            const calledModels = [];
+            const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+                const modelMatch = url.match(/\/models\/([^:]+):generateContent/);
+                if (modelMatch) calledModels.push(modelMatch[1]);
+                return new Response(JSON.stringify({
+                    candidates: [{
+                        content: {
+                            parts: [{ text: JSON.stringify({ reply: "Analysis completed.", voice_summary: "Done." }) }]
+                        }
+                    }]
+                }), { status: 200 });
+            });
+
+            const env = { GEMINI_API_KEY: "mock_key" };
+            const baseCtx = {
+                db: { prepare: () => ({ bind: () => ({ first: async () => null, all: async () => ({ results: [] }) }) }) },
+                userId: "user_boss",
+                isOwner: true
+            };
+
+            // 1. General fast query should call gemini-flash-lite-latest first
+            calledModels.length = 0;
+            await askAiCopilot(env, "how are you", { ...baseCtx, isThinking: false });
+            expect(calledModels[0]).toBe("gemini-flash-lite-latest");
+
+            // 2. /think deep reasoning query should call gemini-3.8-flash first
+            calledModels.length = 0;
+            await askAiCopilot(env, "Analyze our cashflow runway", { ...baseCtx, isThinking: true });
+            expect(calledModels[0]).toBe("gemini-3.8-flash");
+
+            fetchSpy.mockRestore();
+        });
     });
 
     describe("2. Semantic RAG & Historical Search (D1 FTS5 & Search)", () => {

@@ -510,6 +510,45 @@ export async function handleMessage(message, env, origin) {
         return;
     }
 
+    // 0.55. 🧠 F.R.I.D.A.Y. Deep Thought & Reasoning Engine (/think)
+    if (
+        text.startsWith("/think") || 
+        text.startsWith("/reason") || 
+        text === "/think" || 
+        text === "/reason"
+    ) {
+        if (!checkFeature("AI Assistant", "ai_dialog")) {
+            await sendFeatureRestricted(env, chatId, "AI Assistant & Copilot", message.from);
+            return;
+        }
+        const query = text.replace(/^\/(think|reason)(@\w+)?\s*/i, "").trim();
+        if (!query) {
+            const isBoss = isOwner(userId, env);
+            const addressTitle = isBoss ? "Boss" : (message.from?.first_name || "there");
+            await sendMessage(
+                env,
+                chatId,
+                [
+                    `🧠 *F.R.I.D.A.Y. • Deep Thought Mode*`,
+                    ``,
+                    `Engage my flagship reasoning engine (*gemini-3.8-flash* / high-intelligence models) for complex problem solving, strategic financial runway planning, system architecture, or in-depth analysis.`,
+                    ``,
+                    `💡 *Usage Examples:*`,
+                    `• \`/think How can I cut discretionary expenses by 30% without impacting productivity?\``,
+                    `• \`/think Analyze my spending runway and design an aggressive 6-month investment plan\``,
+                    `• \`/think Compare PostgreSQL vs SQLite with D1 for high-write financial apps\``,
+                    `• \`/think Solve this logic problem: ...\``,
+                    ``,
+                    `_Type \`/think <your question>\` to activate deep reasoning, ${addressTitle}!_`
+                ].join("\n"),
+                { parse_mode: "Markdown" }
+            );
+            return;
+        }
+        await handleAiCopilotQuery(env, chatId, userId, query, message.from, null, message.isFromVoice || false, true);
+        return;
+    }
+
     // 0.6. 🧠 F.R.I.D.A.Y. Long-Term Memory & Context Management
     if (text.startsWith("/remember") || text.startsWith("/memorize")) {
         const fact = text.replace(/^\/(remember|memorize)(@\w+)?\s*/i, "").trim();

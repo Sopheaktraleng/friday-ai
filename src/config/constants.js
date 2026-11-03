@@ -2,14 +2,25 @@ export const TIME_ZONE = "Asia/Phnom_Penh";
 export const CURRENCY = "KHR";
 export const EXCHANGE_RATE = 4000; // 1 USD = 4000 KHR
 
-// Verified production models ordered by speed, high quota resilience, and low latency
-export const GEMINI_MODELS = [
+// Fast & reliable models for general routine questions (~800ms - 1s)
+export const GEMINI_FAST_MODELS = [
     "gemini-flash-lite-latest", // Sub-second conversational speed (~800ms) & high free-tier quota
     "gemini-3.5-flash-lite",    // Ultra-low latency speed fallback (~700ms)
-    "gemini-3.1-flash-lite",    // Lite fallback
-    "gemini-3.5-flash",         // Standard high intelligence fallback
-    "gemini-3.8-flash",         // Flagship reasoning fallback
-    "gemini-3.6-flash",         // Next-gen flash
+    "gemini-3.1-flash-lite"     // Lite fallback
+];
+
+// Flagship high-intelligence reasoning models for /think queries (free tier accessible)
+export const GEMINI_THINKING_MODELS = [
+    "gemini-3.8-flash",         // Flagship reasoning (3.8)
+    "gemini-3.7-flash",         // Next-gen reasoning (3.7)
+    "gemini-3.6-flash",         // Next-gen reasoning (3.6)
+    "gemini-3.5-flash"          // Deep intelligence reasoning (3.5)
+];
+
+// Unified production models
+export const GEMINI_MODELS = [
+    ...GEMINI_FAST_MODELS,
+    ...GEMINI_THINKING_MODELS,
     "gemini-flash-latest"       // Production latest alias
 ];
 

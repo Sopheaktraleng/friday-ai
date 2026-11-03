@@ -1031,6 +1031,86 @@ describe("Bot Improvements & Stability", () => {
 
             fetchSpy.mockRestore();
         });
+
+        it("handleMessage should show usage guide when /think is sent with no query", async () => {
+            const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+                Promise.resolve(new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }))
+            );
+
+            const mockEnv = {
+                DB: { prepare: () => ({ bind: () => ({ first: async () => null, all: async () => ({ results: [] }) }) }) },
+                TELEGRAM_BOT_TOKEN: "mock_token",
+                ALLOWED_USER_IDS: "849550186"
+            };
+
+            await handleMessage(
+                { chat: { id: 123456, type: "private" }, from: { id: 849550186, first_name: "Tra" }, text: "/think" },
+                mockEnv,
+                "https://cashflow.workers.dev"
+            );
+
+            expect(fetchSpy).toHaveBeenCalled();
+            const payload = JSON.parse(fetchSpy.mock.calls[0][1].body);
+            expect(payload.text).toContain("Deep Thought Mode");
+            expect(payload.text).toContain("Usage Examples");
+
+            fetchSpy.mockRestore();
+        });
+
+        it("handleMessage should execute deep reasoning when /think is sent with a query", async () => {
+            let capturedUrl = "";
+            const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((url) => {
+                const urlStr = typeof url === "string" ? url : "";
+                if (urlStr.includes("generativelanguage.googleapis.com")) {
+                    capturedUrl = urlStr;
+                    return Promise.resolve(new Response(JSON.stringify({
+                        candidates: [{
+                            content: {
+                                parts: [{
+                                    text: JSON.stringify({
+                                        reply: "Here is the comprehensive financial analysis.",
+                                        voice_summary: "Here is your deep financial analysis Boss."
+                                    })
+                                }]
+                            }
+                        }]
+                    }), { status: 200 }));
+                }
+                return Promise.resolve(new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }));
+            });
+
+            const mockEnv = {
+                DB: {
+                    batch: vi.fn().mockResolvedValue([]),
+                    prepare: () => ({
+                        bind: () => ({
+                            first: async () => null,
+                            all: async () => ({ results: [] }),
+                            run: async () => ({})
+                        })
+                    })
+                },
+                TELEGRAM_BOT_TOKEN: "mock_token",
+                GEMINI_API_KEY: "mock_gemini_key",
+                ALLOWED_USER_IDS: "849550186"
+            };
+
+            await handleMessage(
+                { chat: { id: 123456, type: "private" }, from: { id: 849550186, first_name: "Tra" }, text: "/think What is the best strategy to scale savings?" },
+                mockEnv,
+                "https://cashflow.workers.dev"
+            );
+
+            expect(capturedUrl).toContain("gemini-3.8-flash");
+
+            const sendMsgCall = fetchSpy.mock.calls.find(c => {
+                const body = JSON.parse(c[1]?.body || "{}");
+                return body.text && body.text.includes("Deep Thought");
+            });
+            expect(sendMsgCall).toBeDefined();
+
+            fetchSpy.mockRestore();
+        });
     });
 
     describe("Dynamic User Management & Guest Persona Separation", () => {
@@ -1704,8 +1784,8 @@ describe("Bot Improvements & Stability", () => {
             };
 
             const res = await syncBotCommands(mockEnv);
-            expect(res.guestCommandsCount).toBe(8);
-            expect(res.bossCommandsCount).toBe(9);
+            expect(res.guestCommandsCount).toBe(9);
+            expect(res.bossCommandsCount).toBe(10);
 
             expect(fetchSpy).toHaveBeenCalledTimes(3);
 

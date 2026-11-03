@@ -1,4 +1,4 @@
-import { TIME_ZONE, EXCHANGE_RATE, GEMINI_MODELS, isOwner } from "../config/constants.js";
+import { TIME_ZONE, EXCHANGE_RATE, GEMINI_MODELS, GEMINI_FAST_MODELS, GEMINI_THINKING_MODELS, isOwner } from "../config/constants.js";
 import { today, currentTime, monthPrefix, normalizeReminderTime } from "../utils/time.js";
 import { cleanMd, normalizeCategory } from "../utils/format.js";
 import { arrayBufferToBase64 } from "../utils/crypto.js";
@@ -731,6 +731,7 @@ export function buildCopilotPrompt(userQuery, context) {
     const isOwner = context?.isOwner !== false;
     const userName = context?.userName || (isOwner ? "Boss" : "there");
     const addressUserAs = isOwner ? "Boss" : userName;
+    const isThinking = context?.isThinking === true;
 
     let memoryBlock = "";
     if (context?.userMemories && context.userMemories.length > 0) {
@@ -802,8 +803,11 @@ Core Operating Directives (CRITICAL):
      * Do NOT recite balances, budgets, expenses, tasks, or system status unless ${userLabel} explicitly asked for them.
      * When asked a direct question, answer right on point with no fluff or filler.
    - LENGTH & FORMATTING:
-     * Keep answers SHORT, CLEAN, PROFESSIONAL, and EASY TO UNDERSTAND (1 to 3 natural sentences for standard questions).
-     * Avoid walls of text. Do NOT use bullet points unless ${userLabel} explicitly asks for a list, breakdown, or multi-step plan.
+${isThinking ? `     * DEEP REASONING & STRATEGIC ANALYSIS (ACTIVE via /think):
+       - You are operating in Deep Thought mode with flagship intelligence.
+       - Provide an insightful, well-structured, multi-angle analysis with clear recommendations, pros/cons, and tactical implementation steps.
+       - You are NOT restricted to 1-3 sentences. Offer a thorough, valuable, and comprehensive response while staying clear, executive, and fluff-free.` : `     * Keep answers SHORT, CLEAN, PROFESSIONAL, and EASY TO UNDERSTAND (1 to 3 natural sentences for standard questions).
+     * Avoid walls of text. Do NOT use bullet points unless ${userLabel} explicitly asks for a list, breakdown, or multi-step plan.`}
      * Use light, clean markdown (*bold* for key terms). No decorative ascii dividers or robotic status headers.
    - Real-World Grounding & Personality:
      * Ground all advice and conversation strictly in the REAL WORLD. Speak with natural warmth, intelligence, and polish.
@@ -1240,20 +1244,34 @@ export async function askAiCopilot(env, userQuery, context) {
     const prompt = buildCopilotPrompt(userQuery, context);
 
     if (env.GEMINI_API_KEY) {
-        // Prioritize ultra-fast flash-lite models for sub-second conversational latency
+        const isThinkingMode = context?.isThinking === true;
         const explicitModel = env?.GEMINI_MODEL;
-        const baseModels = GEMINI_MODELS.filter(m => m !== "gemini-3-flash-preview");
-        const liteModels = baseModels.filter(m => m.includes("lite"));
-        const otherModels = baseModels.filter(m => !m.includes("lite"));
-        const candidateModels = Array.from(new Set([
-            explicitModel,
-            ...liteModels,
-            ...otherModels
-        ].filter(Boolean)));
+        
+        let candidateModels;
+        let timeoutMs;
+        let temperature;
 
-        // Dynamic temperature: higher for creative/casual queries, balanced for general copilot questions
-        const isCreativeQuery = /\b(joke|funny|laugh|story|say anything|chat|talk to me|how are you|who are you|bored|poem|quote|opinion)\b/i.test(userQuery);
-        const temperature = isCreativeQuery ? 0.85 : 0.65;
+        if (isThinkingMode) {
+            // Flagship reasoning brain: 3.8-flash, 3.7-flash, 3.5-flash with fast models as safe fallback
+            const thinkingExplicit = env?.GEMINI_THINKING_MODEL || explicitModel;
+            candidateModels = Array.from(new Set([
+                thinkingExplicit,
+                ...GEMINI_THINKING_MODELS,
+                ...GEMINI_FAST_MODELS
+            ].filter(Boolean)));
+            timeoutMs = 12000;
+            temperature = 0.35; // Focused, analytical precision
+        } else {
+            // Ultra-fast conversational brain: sub-second flash-lite models with heavy models as fallback
+            candidateModels = Array.from(new Set([
+                explicitModel,
+                ...GEMINI_FAST_MODELS,
+                ...GEMINI_THINKING_MODELS
+            ].filter(Boolean)));
+            timeoutMs = 4000;
+            const isCreativeQuery = /\b(joke|funny|laugh|story|say anything|chat|talk to me|how are you|who are you|bored|poem|quote|opinion)\b/i.test(userQuery);
+            temperature = isCreativeQuery ? 0.85 : 0.65;
+        }
 
         const contents = buildGeminiContents(context?.chatHistory || [], userQuery);
 
@@ -1262,7 +1280,8 @@ export async function askAiCopilot(env, userQuery, context) {
                 const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`;
                 
                 const modelGenConfig = { temperature };
-                if (model.includes("thinking")) {
+                if (model.includes("thinking") && !isThinkingMode) {
+                    // Suppress thinking budget only for fast routine queries to keep latency low
                     modelGenConfig.thinkingConfig = { thinkingBudget: 0 };
                 }
 
@@ -1283,7 +1302,7 @@ export async function askAiCopilot(env, userQuery, context) {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: requestBody,
-                    signal: AbortSignal.timeout(4000)
+                    signal: AbortSignal.timeout(timeoutMs)
                 });
 
                 // Fallback to monolithic prompt if model rejects tools or system_instruction

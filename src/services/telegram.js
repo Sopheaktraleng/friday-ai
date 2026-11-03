@@ -184,7 +184,10 @@ export function getUserCommandList(permissions, isBoss = false) {
     }
 
     if (hasPerm("ai_dialog")) {
-        commands.push({ command: "search", description: "🌐 Live Google Search Grounding" });
+        commands.push(
+            { command: "think", description: "🧠 Deep Reasoning & Strategy" },
+            { command: "search", description: "🌐 Live Google Search Grounding" }
+        );
     }
 
     if (hasPerm("finance")) {

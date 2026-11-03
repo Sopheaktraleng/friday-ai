@@ -327,7 +327,7 @@ export function buildSmartLocalFallback(query, context = {}) {
     };
 }
 
-export async function handleAiCopilotQuery(env, chatId, userId, query, from, messageId = null, isVoice = false) {
+export async function handleAiCopilotQuery(env, chatId, userId, query, from, messageId = null, isVoice = false, isThinking = false) {
     try {
         await ensureTables(env.DB);
         const cleanQuery = (query || "").trim();
@@ -381,6 +381,7 @@ export async function handleAiCopilotQuery(env, chatId, userId, query, from, mes
         context.chatId = chatId;
         context.isOwner = isUserOwner;
         context.userName = requesterName;
+        context.isThinking = isThinking;
         let result = null;
 
         // Try conversational AI if keys are present
@@ -458,6 +459,10 @@ export async function handleAiCopilotQuery(env, chatId, userId, query, from, mes
             } catch (actErr) {
                 console.error("Failed to execute AI Copilot action:", actErr);
             }
+        }
+
+        if (isThinking && result?.reply && !result.reply.startsWith("🧠")) {
+            result.reply = `🧠 *F.R.I.D.A.Y. Deep Thought*\n\n${result.reply}`;
         }
 
         // Asynchronously persist conversation history turns into chat_history
