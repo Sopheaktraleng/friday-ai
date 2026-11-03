@@ -465,11 +465,13 @@ export async function handleAiCopilotQuery(env, chatId, userId, query, from, mes
             result.reply = `🧠 *F.R.I.D.A.Y. Deep Thought*\n\n${result.reply}`;
         }
 
-        // Asynchronously persist conversation history turns into chat_history
-        saveChatMessage(env.DB, userId, "user", cleanQuery).catch(() => {});
-        if (result.reply) {
-            saveChatMessage(env.DB, userId, "model", result.reply).catch(() => {});
-        }
+        // Persist conversation history turns into chat_history before delivering reply
+        try {
+            await Promise.all([
+                saveChatMessage(env.DB, userId, "user", cleanQuery),
+                result?.reply ? saveChatMessage(env.DB, userId, "model", result.reply) : Promise.resolve()
+            ]);
+        } catch (_) {}
 
         // If voice mode is active (or input was voice/speak), deliver text instantly, then send audio transmission
         if (shouldVoice) {

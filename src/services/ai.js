@@ -538,9 +538,9 @@ export async function buildAiUserContext(db, userId, userQuery = null) {
                 db.prepare(
                     "SELECT title, reminder_time, frequency, type FROM reminders WHERE user_id = ? AND is_active = 1 ORDER BY reminder_time ASC LIMIT 5"
                 ).bind(userId),
-                // 10. Recent chat history (6)
+                // 10. Recent chat history (18 messages = ~9 multi-turn conversation rounds)
                 db.prepare(
-                    `SELECT id, role, content FROM (SELECT id, role, content FROM chat_history WHERE user_id = ? ORDER BY id DESC LIMIT 6) ORDER BY id ASC`
+                    `SELECT id, role, content FROM (SELECT id, role, content FROM chat_history WHERE user_id = ? ORDER BY id DESC LIMIT 18) ORDER BY id ASC`
                 ).bind(userId),
                 // 11. User memories (15)
                 db.prepare(
@@ -609,7 +609,7 @@ export async function buildAiUserContext(db, userId, userQuery = null) {
             db.prepare(
                 "SELECT title, reminder_time, frequency, type FROM reminders WHERE user_id = ? AND is_active = 1 ORDER BY reminder_time ASC LIMIT 5"
             ).bind(userId).all(),
-            getRecentChatHistory(db, userId, 6),
+            getRecentChatHistory(db, userId, 18),
             getUserMemories(db, userId, 15)
         ]);
 
@@ -883,14 +883,17 @@ export function buildGeminiContents(chatHistory = [], currentQuery) {
     let lastRole = null;
 
     if (Array.isArray(chatHistory)) {
-        for (const msg of chatHistory) {
+        // User-Turn Alignment: ensure the conversation starts from the first "user" turn in the window
+        let startIndex = 0;
+        while (startIndex < chatHistory.length && chatHistory[startIndex]?.role !== "user") {
+            startIndex++;
+        }
+
+        for (let i = startIndex; i < chatHistory.length; i++) {
+            const msg = chatHistory[i];
             const role = msg.role === "model" ? "model" : "user";
             const text = (msg.content || "").trim();
             if (!text) continue;
-
-            if (turns.length === 0 && role !== "user") {
-                continue;
-            }
 
             if (role === lastRole) {
                 turns[turns.length - 1].parts[0].text += `\n${text}`;

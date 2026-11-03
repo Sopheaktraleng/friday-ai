@@ -7,7 +7,8 @@ import {
     parseStatementOrInvoicePdfWithGemini,
     buildAiUserContext,
     shouldPerformHistoricalSearch,
-    parseCopilotResponse
+    parseCopilotResponse,
+    buildGeminiContents
 } from "../src/services/ai.js";
 import {
     searchWorkLogs,
@@ -721,6 +722,77 @@ describe("Core AI & Agentic Intelligence Adjustments", () => {
             expect(fetchSpy).toHaveBeenCalled();
             const editCall = fetchSpy.mock.calls.find(c => String(c[0]).includes("editMessageText") || String(c[0]).includes("answerCallbackQuery"));
             expect(editCall).toBeDefined();
+        });
+    });
+
+    describe("7. Conversation Memory & User-Turn Alignment (buildGeminiContents)", () => {
+        it("should align to the first user turn when chat history starts with orphan model turns", () => {
+            const rawHistory = [
+                { role: "model", content: "Orphan response from earlier" },
+                { role: "model", content: "Another model remark" },
+                { role: "user", content: "calculate my dialy expense, since i need to pay for home bil 150$ and give me monther 50$" },
+                { role: "model", content: "Sure, let's break it down." },
+                { role: "user", content: "u check my remaining salary yet" },
+                { role: "model", content: "Your balance is $257.07." }
+            ];
+
+            const contents = buildGeminiContents(rawHistory, "calcalate for me again");
+
+            // Must start with role 'user'
+            expect(contents[0].role).toBe("user");
+            expect(contents[0].parts[0].text).toContain("calculate my dialy expense");
+            // Must contain previous model turn and follow-up turns
+            expect(contents[1].role).toBe("model");
+            expect(contents[1].parts[0].text).toContain("Sure, let's break it down.");
+            expect(contents[2].role).toBe("user");
+            expect(contents[2].parts[0].text).toContain("u check my remaining salary yet");
+            expect(contents[3].role).toBe("model");
+            expect(contents[3].parts[0].text).toContain("Your balance is $257.07.");
+            // Must end with the current query appended
+            expect(contents[contents.length - 1].role).toBe("user");
+            expect(contents[contents.length - 1].parts[0].text).toBe("calcalate for me again");
+        });
+
+        it("should handle history with only model turns gracefully", () => {
+            const rawHistory = [
+                { role: "model", content: "Only model message here" }
+            ];
+            const contents = buildGeminiContents(rawHistory, "Hello Friday");
+            expect(contents.length).toBe(1);
+            expect(contents[0].role).toBe("user");
+            expect(contents[0].parts[0].text).toBe("Hello Friday");
+        });
+
+        it("should coalesce consecutive turns of the same role", () => {
+            const rawHistory = [
+                { role: "user", content: "Turn 1 part A" },
+                { role: "user", content: "Turn 1 part B" },
+                { role: "model", content: "Response" }
+            ];
+            const contents = buildGeminiContents(rawHistory, "Next question");
+            expect(contents.length).toBe(3);
+            expect(contents[0].role).toBe("user");
+            expect(contents[0].parts[0].text).toBe("Turn 1 part A\nTurn 1 part B");
+            expect(contents[1].role).toBe("model");
+            expect(contents[2].role).toBe("user");
+            expect(contents[2].parts[0].text).toBe("Next question");
+        });
+
+        it("should handle up to 18 messages cleanly without dropping valid turns", () => {
+            const history18 = [];
+            for (let i = 1; i <= 9; i++) {
+                history18.push({ role: "user", content: `User query ${i}` });
+                history18.push({ role: "model", content: `Model reply ${i}` });
+            }
+            expect(history18.length).toBe(18);
+
+            const contents = buildGeminiContents(history18, "Query 10");
+            // 18 turns + 1 final query = 19 turns
+            expect(contents.length).toBe(19);
+            expect(contents[0].role).toBe("user");
+            expect(contents[0].parts[0].text).toBe("User query 1");
+            expect(contents[contents.length - 1].role).toBe("user");
+            expect(contents[contents.length - 1].parts[0].text).toBe("Query 10");
         });
     });
 });

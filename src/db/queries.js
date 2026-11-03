@@ -442,7 +442,7 @@ export async function getBudgetWarningText(db, userId) {
 // Multi-turn Conversation & Personal Long-Term Memory
 // ============================================================================
 
-export async function getRecentChatHistory(db, userId, limit = 8) {
+export async function getRecentChatHistory(db, userId, limit = 18) {
     try {
         const { results } = await db
             .prepare(
@@ -469,9 +469,9 @@ export async function saveChatMessage(db, userId, role, content) {
             .bind(userId, role, content)
             .run();
 
-        // Maintain lean storage: keep most recent 30 conversation turns per user
+        // Maintain lean storage: keep most recent 50 conversation turns per user
         db.prepare(
-            "DELETE FROM chat_history WHERE user_id = ? AND id NOT IN (SELECT id FROM chat_history WHERE user_id = ? ORDER BY id DESC LIMIT 30)"
+            "DELETE FROM chat_history WHERE user_id = ? AND id NOT IN (SELECT id FROM chat_history WHERE user_id = ? ORDER BY id DESC LIMIT 50)"
         )
             .bind(userId, userId)
             .run()
