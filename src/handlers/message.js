@@ -531,7 +531,7 @@ export async function handleMessage(message, env, origin) {
                 [
                     `🧠 *F.R.I.D.A.Y. • Deep Thought Mode*`,
                     ``,
-                    `Engage my flagship reasoning engine (*gemini-3.8-flash* / high-intelligence models) for complex problem solving, strategic financial runway planning, system architecture, or in-depth analysis.`,
+                    `Engage my flagship reasoning engine (*gemini-3.6-flash* / high-intelligence models) for complex problem solving, strategic financial runway planning, system architecture, or in-depth analysis.`,
                     ``,
                     `💡 *Usage Examples:*`,
                     `• \`/think How can I cut discretionary expenses by 30% without impacting productivity?\``,

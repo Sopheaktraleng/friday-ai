@@ -385,10 +385,10 @@ describe("Core AI & Agentic Intelligence Adjustments", () => {
             await askAiCopilot(env, "how are you", { ...baseCtx, isThinking: false });
             expect(calledModels[0]).toBe("gemini-flash-lite-latest");
 
-            // 2. /think deep reasoning query should call gemini-3.8-flash first
+            // 2. /think deep reasoning query should call gemini-3.6-flash first
             calledModels.length = 0;
             await askAiCopilot(env, "Analyze our cashflow runway", { ...baseCtx, isThinking: true });
-            expect(calledModels[0]).toBe("gemini-3.8-flash");
+            expect(calledModels[0]).toBe("gemini-3.6-flash");
 
             fetchSpy.mockRestore();
         });

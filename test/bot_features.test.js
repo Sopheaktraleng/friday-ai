@@ -1101,7 +1101,7 @@ describe("Bot Improvements & Stability", () => {
                 "https://cashflow.workers.dev"
             );
 
-            expect(capturedUrl).toContain("gemini-3.8-flash");
+            expect(capturedUrl).toContain("gemini-3.6-flash");
 
             const sendMsgCall = fetchSpy.mock.calls.find(c => {
                 const body = JSON.parse(c[1]?.body || "{}");

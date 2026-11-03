@@ -815,8 +815,16 @@ ${isThinking ? `     * DEEP REASONING & STRATEGIC ANALYSIS (ACTIVE via /think):
      * STRICTLY AVOID referencing Marvel, Iron Man, Tony Stark, Ultron, arc reactors, superhero suits, or comic/movie lore. Speak as an elite real-world executive chief of staff.
    - Casual Chit-Chat:
      * If ${userLabel} says "hi", "how are you", "say anything", tells a joke, or makes small talk: respond with wit, warmth, and charm in 1-2 friendly human sentences. Never dump an unprompted status report. ${!isOwner ? "Do NOT call them Boss." : ""}
+   - TOOL USAGE EFFICIENCY (CRITICAL):
+     * If the requested calculation, balances, or totals can be answered using the ONBOARD LIVE TELEMETRY or the conversation history (e.g. daily allowance, remaining money, runway planning), DO NOT call query_ledger or query_work_logs. Answer directly and perform the reasoning immediately.
+     * Only invoke query_ledger or query_work_logs when ${userLabel} explicitly asks to search or list past transaction records (e.g. "show my recent transactions", "find Starbucks payments", "check past logs").
 2. Financial Defense & Strategic Runway Advisory:
-   - When asked "Can I afford X?" or about spending room / runway:
+   - When asked "Can I afford X?", "how much can I spend daily", or about runway / budget:
+     * Honor all fixed commitments, obligations, or bills discussed in the recent conversation (e.g. rent, home bill, money for mother/family).
+     * Calculate both:
+       (a) Safe Discretionary Allowance (after reserving fixed obligations) = (netBalance - obligations) / daysRemaining.
+       (b) Gross Burn Rate (if spending full balance without withholding obligations) = netBalance / daysRemaining.
+     * Always highlight the safe discretionary allowance clearly so the user avoids overspending and defaulting on fixed obligations.
      * Cross-reference telemetry.budget (remainingUsd, safeDailyLimitUsd, daysRemainingInMonth) and telemetry.totals.
      * Calculate post-purchase safe daily limit: (remainingUsd - cost) / daysRemainingInMonth.
      * If affordable: Give clear, encouraging green-light advice with exact remaining daily room (e.g. "Yes Boss, comfortably. Spending $30 leaves you with $210 for 14 days, or $15/day safe burn rate.").
@@ -1255,14 +1263,14 @@ export async function askAiCopilot(env, userQuery, context) {
         let temperature;
 
         if (isThinkingMode) {
-            // Flagship reasoning brain: 3.8-flash, 3.7-flash, 3.5-flash with fast models as safe fallback
+            // Flagship reasoning brain: 3.6-flash, 3.5-flash with fast models as safe fallback
             const thinkingExplicit = env?.GEMINI_THINKING_MODEL || explicitModel;
             candidateModels = Array.from(new Set([
                 thinkingExplicit,
                 ...GEMINI_THINKING_MODELS,
                 ...GEMINI_FAST_MODELS
             ].filter(Boolean)));
-            timeoutMs = 12000;
+            timeoutMs = 6500; // Cap per-model attempt to 6.5s to prevent cloudflare/webhook timeouts
             temperature = 0.35; // Focused, analytical precision
         } else {
             // Ultra-fast conversational brain: sub-second flash-lite models with heavy models as fallback
@@ -1271,14 +1279,20 @@ export async function askAiCopilot(env, userQuery, context) {
                 ...GEMINI_FAST_MODELS,
                 ...GEMINI_THINKING_MODELS
             ].filter(Boolean)));
-            timeoutMs = 4000;
+            timeoutMs = 3500;
             const isCreativeQuery = /\b(joke|funny|laugh|story|say anything|chat|talk to me|how are you|who are you|bored|poem|quote|opinion)\b/i.test(userQuery);
             temperature = isCreativeQuery ? 0.85 : 0.65;
         }
 
         const contents = buildGeminiContents(context?.chatHistory || [], userQuery);
+        const startTime = Date.now();
+        const maxBudgetMs = isThinkingMode ? 12000 : 7000;
 
         for (const model of candidateModels) {
+            if (Date.now() - startTime > maxBudgetMs) {
+                console.warn(`Gemini Copilot time budget exceeded (${Date.now() - startTime}ms), aborting further model attempts`);
+                break;
+            }
             try {
                 const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`;
                 
