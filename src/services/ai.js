@@ -1368,7 +1368,7 @@ export async function askAiCopilot(env, userQuery, context) {
                             const followUpContents = [
                                 ...contents,
                                 { role: "model", parts: candidate.content.parts },
-                                { role: "function", parts: functionResponses }
+                                { role: "user", parts: functionResponses }
                             ];
 
                             const followUpResp = await fetch(url, {
@@ -1379,7 +1379,7 @@ export async function askAiCopilot(env, userQuery, context) {
                                     contents: followUpContents,
                                     generationConfig: { temperature: 0.3 }
                                 }),
-                                signal: AbortSignal.timeout(6000)
+                                signal: AbortSignal.timeout(9000)
                             });
 
                             if (followUpResp.ok) {
@@ -1420,10 +1420,17 @@ export async function askAiCopilot(env, userQuery, context) {
 
                     const isOwner = context?.isOwner !== false;
                     const addressTitle = isOwner ? "Boss" : (context?.userName || "there");
-                    const reply = `Done right away, ${addressTitle}. Executed ${executedActions.length} system command${executedActions.length > 1 ? "s" : ""}.`;
+                    let reply;
+                    if (executedActions.length > 0) {
+                        reply = `Done right away, ${addressTitle}. Executed ${executedActions.length} system command${executedActions.length > 1 ? "s" : ""}.`;
+                    } else if (hasQueryTool) {
+                        reply = `I checked your records, ${addressTitle}. No matching entries were found in your ledger.`;
+                    } else {
+                        reply = `Understood, ${addressTitle}. Standing by for your next instruction.`;
+                    }
                     return {
                         reply,
-                        voice_summary: `Done right away ${addressTitle}.`,
+                        voice_summary: reply.replace(/[*_#`~\[\]\(\)]/g, ""),
                         action: executedActions[0] || null,
                         actions: executedActions
                     };

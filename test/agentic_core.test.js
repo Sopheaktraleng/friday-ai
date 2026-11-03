@@ -259,6 +259,12 @@ describe("Core AI & Agentic Intelligence Adjustments", () => {
             expect(result).toBeDefined();
             expect(callCount).toBe(2); // Initial tool call + follow-up synthesis turn
             expect(result.reply).toContain("$4.50");
+
+            // Turn 2 must send role: "user" for function responses (role: "function" is rejected by modern Gemini API)
+            const turn2Body = JSON.parse(fetchSpy.mock.calls[1][1].body);
+            const funcTurn = turn2Body.contents.find(c => c.parts.some(p => p.functionResponse));
+            expect(funcTurn).toBeDefined();
+            expect(funcTurn.role).toBe("user");
         });
 
         it("buildAiUserContext should compute smart runway and safe daily limit", async () => {
