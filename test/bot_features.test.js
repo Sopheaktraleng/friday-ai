@@ -18,11 +18,12 @@ import { handleAddWorkLogCommand, handleListTodayTasksCommand, handleListTasksHi
 
 describe("Bot Improvements & Stability", () => {
     describe("AI Configuration", () => {
-        it("should have higher intelligence Gemini production models ordered by capability and reliability", () => {
+        it("should have higher intelligence Gemini production models ordered by speed and quota resilience", () => {
             expect(GEMINI_MODELS).toContain("gemini-3.5-flash");
             expect(GEMINI_MODELS).toContain("gemini-3.6-flash");
             expect(GEMINI_MODELS).toContain("gemini-3.5-flash-lite");
-            expect(GEMINI_MODELS[0]).toBe("gemini-3.5-flash");
+            expect(GEMINI_MODELS).toContain("gemini-flash-lite-latest");
+            expect(GEMINI_MODELS[0]).toBe("gemini-flash-lite-latest");
         });
     });
 

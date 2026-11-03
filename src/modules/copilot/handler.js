@@ -368,15 +368,11 @@ export async function handleAiCopilotQuery(env, chatId, userId, query, from, mes
             return;
         }
 
-        const [userVoicePref, context] = await Promise.all([
-            getUserVoiceMode(env.DB, userId),
-            buildAiUserContext(env.DB, userId, cleanQuery)
-        ]);
-        const shouldVoice = isVoice || userVoicePref === "on";
+        const context = await buildAiUserContext(env.DB, userId, cleanQuery);
+        const shouldVoice = isVoice || context.voiceMode === "on";
 
-        try {
-            await telegram(env, "sendChatAction", { chat_id: chatId, action: shouldVoice ? "record_voice" : "typing" });
-        } catch (e) {}
+        // Non-blocking typing indicator to avoid blocking roundtrip delay
+        telegram(env, "sendChatAction", { chat_id: chatId, action: shouldVoice ? "record_voice" : "typing" }).catch(() => {});
 
         const isUserOwner = isOwner(userId, env);
         const requesterName = from?.first_name || from?.username || (isUserOwner ? "Boss" : "Friend");

@@ -1,5 +1,5 @@
 import { TIME_ZONE, EXCHANGE_RATE, GEMINI_MODELS, isOwner } from "../config/constants.js";
-import { today, currentTime, normalizeReminderTime } from "../utils/time.js";
+import { today, currentTime, monthPrefix, normalizeReminderTime } from "../utils/time.js";
 import { cleanMd, normalizeCategory } from "../utils/format.js";
 import { arrayBufferToBase64 } from "../utils/crypto.js";
 import { 
@@ -428,50 +428,209 @@ Return ONLY pure JSON.`;
     return null;
 }
 
+/**
+ * Determines whether a user query requires historical recall or full-text RAG search,
+ * preventing unnecessary multi-table FTS5 scans on routine messages and casual chat.
+ */
+export function shouldPerformHistoricalSearch(query) {
+    if (!query || typeof query !== "string") return false;
+    const q = query.trim().toLowerCase();
+    if (q.length < 3) return false;
+
+    // Direct temporal, memory, or historical lookups
+    // e.g. "when was the last time...", "did I buy...", "how much did I spend on Grab"
+    if (/\b(?:when\s+(?:did|was|have|do)|last\s+(?:time|month|week|year|date)|did\s+i|have\s+i|how\s+much\s+(?:did|have|on|for)|history|past|previously|before|recall|search|find|lookup|look\s+up)\b/i.test(q)) {
+        return true;
+    }
+
+    // Specific expense or task targets
+    if (/\b(?:spent\s+on|paid\s+for|bought\s+at|logged\s+for)\b/i.test(q)) {
+        return true;
+    }
+
+    return false;
+}
+
 export async function buildAiUserContext(db, userId, userQuery = null) {
     const curDate = today();
+    const curMonth = monthPrefix();
     const curTime = currentTime();
 
-    const [
-        displayCurrency,
-        todaySummary,
-        monthSummary,
-        allSummary,
-        settingsRow,
-        monthCats,
-        todayCats,
-        recentExpenses,
-        todayTasks,
-        recentTasks,
-        activeReminders,
-        recentChat,
-        memories
-    ] = await Promise.all([
-        getDisplayCurrency(db, userId),
-        getFinancialSummary(db, userId, "today"),
-        getFinancialSummary(db, userId, "month"),
-        getFinancialSummary(db, userId, "all"),
-        db.prepare("SELECT monthly_budget FROM user_settings WHERE user_id = ?").bind(userId).first(),
-        getCategoryRows(db, userId, "month", 5),
-        getCategoryRows(db, userId, "today", 5),
-        db.prepare(
-            "SELECT id, date, amount, currency, category, type, merchant, note, created_at FROM expenses WHERE user_id = ? ORDER BY date DESC, id DESC LIMIT 10"
-        ).bind(userId).all(),
-        db.prepare(
-            "SELECT time, content, category FROM work_logs WHERE user_id = ? AND date = ? ORDER BY time ASC, id ASC"
-        ).bind(userId, curDate).all(),
-        db.prepare(
-            "SELECT date, time, content, category FROM work_logs WHERE user_id = ? ORDER BY date DESC, id DESC LIMIT 5"
-        ).bind(userId).all(),
-        db.prepare(
-            "SELECT title, reminder_time, frequency, type FROM reminders WHERE user_id = ? AND is_active = 1 ORDER BY reminder_time ASC LIMIT 5"
-        ).bind(userId).all(),
-        getRecentChatHistory(db, userId, 6),
-        getUserMemories(db, userId, 15)
-    ]);
+    let displayCurrency = "USD";
+    let todaySummary = null;
+    let monthSummary = null;
+    let allSummary = null;
+    let settingsRow = null;
+    let monthCats = [];
+    let todayCats = [];
+    let recentExpenses = { results: [] };
+    let todayTasks = { results: [] };
+    let recentTasks = { results: [] };
+    let activeReminders = { results: [] };
+    let recentChat = [];
+    let memories = [];
 
+    // Helper to calculate totals from grouped summary rows
+    const parseSummaryRows = (rows) => {
+        let incomeUsd = 0, incomeKhr = 0, expenseUsd = 0, expenseKhr = 0;
+        if (Array.isArray(rows)) {
+            for (const r of rows) {
+                const amt = Number(r.total || 0);
+                if (r.type === "income") {
+                    if (r.currency === "USD") incomeUsd += amt;
+                    else incomeKhr += amt;
+                } else {
+                    if (r.currency === "USD") expenseUsd += amt;
+                    else expenseKhr += amt;
+                }
+            }
+        }
+        const totalIncomeInKhr = incomeKhr + (incomeUsd * EXCHANGE_RATE);
+        const totalExpenseInKhr = expenseKhr + (expenseUsd * EXCHANGE_RATE);
+        const balanceKhr = totalIncomeInKhr - totalExpenseInKhr;
+        return { incomeKhr, incomeUsd, expenseKhr, expenseUsd, totalIncomeInKhr, totalExpenseInKhr, balanceKhr };
+    };
+
+    // 1. High-Performance Cloudflare D1 Batch Execution:
+    // Bundles all 12 queries into 1 single atomic wire trip to eliminate isolate-to-D1 roundtrip latency
+    if (db && typeof db.batch === "function") {
+        try {
+            const stmts = [
+                // 0. Settings: combined display_currency, monthly_budget & voice_mode
+                db.prepare("SELECT display_currency, monthly_budget, voice_mode FROM user_settings WHERE user_id = ?").bind(userId),
+                // 1. Today financial summary
+                db.prepare(
+                    `SELECT type, currency, SUM(amount) AS total FROM expenses WHERE user_id = ? AND date = ? GROUP BY type, currency`
+                ).bind(userId, curDate),
+                // 2. Month financial summary
+                db.prepare(
+                    `SELECT type, currency, SUM(amount) AS total FROM expenses WHERE user_id = ? AND date LIKE ? GROUP BY type, currency`
+                ).bind(userId, `${curMonth}%`),
+                // 3. All-time financial summary
+                db.prepare(
+                    `SELECT type, currency, SUM(amount) AS total FROM expenses WHERE user_id = ? GROUP BY type, currency`
+                ).bind(userId),
+                // 4. Month top categories
+                db.prepare(
+                    `SELECT category, SUM(CASE WHEN currency = 'USD' THEN amount * ${EXCHANGE_RATE} ELSE amount END) AS total, COUNT(*) AS count
+                     FROM expenses WHERE user_id = ? AND type = 'expense' AND date LIKE ?
+                     GROUP BY LOWER(category) ORDER BY total DESC LIMIT 5`
+                ).bind(userId, `${curMonth}%`),
+                // 5. Today top categories
+                db.prepare(
+                    `SELECT category, SUM(CASE WHEN currency = 'USD' THEN amount * ${EXCHANGE_RATE} ELSE amount END) AS total, COUNT(*) AS count
+                     FROM expenses WHERE user_id = ? AND type = 'expense' AND date = ?
+                     GROUP BY LOWER(category) ORDER BY total DESC LIMIT 5`
+                ).bind(userId, curDate),
+                // 6. Recent expenses (10)
+                db.prepare(
+                    "SELECT id, date, amount, currency, category, type, merchant, note, created_at FROM expenses WHERE user_id = ? ORDER BY date DESC, id DESC LIMIT 10"
+                ).bind(userId),
+                // 7. Today tasks
+                db.prepare(
+                    "SELECT time, content, category FROM work_logs WHERE user_id = ? AND date = ? ORDER BY time ASC, id ASC"
+                ).bind(userId, curDate),
+                // 8. Recent tasks (5)
+                db.prepare(
+                    "SELECT date, time, content, category FROM work_logs WHERE user_id = ? ORDER BY date DESC, id DESC LIMIT 5"
+                ).bind(userId),
+                // 9. Active reminders (5)
+                db.prepare(
+                    "SELECT title, reminder_time, frequency, type FROM reminders WHERE user_id = ? AND is_active = 1 ORDER BY reminder_time ASC LIMIT 5"
+                ).bind(userId),
+                // 10. Recent chat history (6)
+                db.prepare(
+                    `SELECT id, role, content FROM (SELECT id, role, content FROM chat_history WHERE user_id = ? ORDER BY id DESC LIMIT 6) ORDER BY id ASC`
+                ).bind(userId),
+                // 11. User memories (15)
+                db.prepare(
+                    "SELECT id, fact, category FROM user_memories WHERE user_id = ? ORDER BY id DESC LIMIT 15"
+                ).bind(userId)
+            ];
+
+            const batchResults = await db.batch(stmts);
+
+            if (Array.isArray(batchResults) && batchResults.length >= 12) {
+                const sRow = batchResults[0]?.results?.[0];
+                displayCurrency = sRow?.display_currency || "USD";
+                settingsRow = sRow || null;
+
+                todaySummary = parseSummaryRows(batchResults[1]?.results);
+                monthSummary = parseSummaryRows(batchResults[2]?.results);
+                allSummary = parseSummaryRows(batchResults[3]?.results);
+
+                monthCats = batchResults[4]?.results || [];
+                todayCats = batchResults[5]?.results || [];
+                recentExpenses = batchResults[6] || { results: [] };
+                todayTasks = batchResults[7] || { results: [] };
+                recentTasks = batchResults[8] || { results: [] };
+                activeReminders = batchResults[9] || { results: [] };
+                recentChat = batchResults[10]?.results || [];
+                memories = batchResults[11]?.results || [];
+            }
+        } catch (batchErr) {
+            console.warn("D1 batch execution fallback:", batchErr.message);
+        }
+    }
+
+    // 2. Resilient fallback for test mocks or database bindings where db.batch is not implemented
+    if (!settingsRow && (!todaySummary || !monthSummary)) {
+        const [
+            dispCurr,
+            tSummary,
+            mSummary,
+            aSummary,
+            sRow,
+            mCats,
+            tCats,
+            rExpenses,
+            tTasks,
+            rTasks,
+            aReminders,
+            rChat,
+            uMemories
+        ] = await Promise.all([
+            getDisplayCurrency(db, userId),
+            getFinancialSummary(db, userId, "today"),
+            getFinancialSummary(db, userId, "month"),
+            getFinancialSummary(db, userId, "all"),
+            db.prepare("SELECT display_currency, monthly_budget, voice_mode FROM user_settings WHERE user_id = ?").bind(userId).first(),
+            getCategoryRows(db, userId, "month", 5),
+            getCategoryRows(db, userId, "today", 5),
+            db.prepare(
+                "SELECT id, date, amount, currency, category, type, merchant, note, created_at FROM expenses WHERE user_id = ? ORDER BY date DESC, id DESC LIMIT 10"
+            ).bind(userId).all(),
+            db.prepare(
+                "SELECT time, content, category FROM work_logs WHERE user_id = ? AND date = ? ORDER BY time ASC, id ASC"
+            ).bind(userId, curDate).all(),
+            db.prepare(
+                "SELECT date, time, content, category FROM work_logs WHERE user_id = ? ORDER BY date DESC, id DESC LIMIT 5"
+            ).bind(userId).all(),
+            db.prepare(
+                "SELECT title, reminder_time, frequency, type FROM reminders WHERE user_id = ? AND is_active = 1 ORDER BY reminder_time ASC LIMIT 5"
+            ).bind(userId).all(),
+            getRecentChatHistory(db, userId, 6),
+            getUserMemories(db, userId, 15)
+        ]);
+
+        displayCurrency = dispCurr;
+        todaySummary = tSummary;
+        monthSummary = mSummary;
+        allSummary = aSummary;
+        settingsRow = sRow;
+        monthCats = mCats;
+        todayCats = tCats;
+        recentExpenses = rExpenses;
+        todayTasks = tTasks;
+        recentTasks = rTasks;
+        activeReminders = aReminders;
+        recentChat = rChat;
+        memories = uMemories;
+    }
+
+    // 3. Smart FTS5 Pruning: only scan historical tables when the query is actually asking about the past
     let relevantHistory = null;
-    if (userQuery && typeof userQuery === "string" && userQuery.trim().length > 2) {
+    if (userQuery && typeof userQuery === "string" && shouldPerformHistoricalSearch(userQuery)) {
         try {
             relevantHistory = await searchHistoricalRecords(db, userId, userQuery.trim(), { limit: 5 });
         } catch (_) {}
@@ -500,6 +659,7 @@ export async function buildAiUserContext(db, userId, userQuery = null) {
         currentTime: curTime,
         timezone: TIME_ZONE,
         displayCurrency,
+        voiceMode: settingsRow?.voice_mode || "off",
         budget: budgetKhr > 0 ? {
             limitUsd: Number((budgetKhr / EXCHANGE_RATE).toFixed(2)),
             limitKhr: budgetKhr,
@@ -799,6 +959,33 @@ export function parseCopilotResponse(rawText) {
                 if (res) return res;
             } catch (e2) {}
         }
+
+        // Resilient regex extraction for JSON with unescaped literal newlines or control characters
+        const fieldMatch = clean.match(/"(?:reply|content|message|response|text|answer)"\s*:\s*"([\s\S]*?)"(?:\s*,|\s*})/);
+        if (fieldMatch) {
+            const replyText = fieldMatch[1].replace(/\\n/g, "\n").replace(/\\"/g, '"').trim();
+            if (replyText) {
+                return {
+                    reply: replyText,
+                    voice_summary: null,
+                    action: null,
+                    actions: []
+                };
+            }
+        }
+    }
+
+    // Safety guard against raw JSON leak: if string looks like an unparsed envelope, never display raw JSON to user
+    if (clean.startsWith("{") && clean.endsWith("}") && (clean.includes('"role"') || clean.includes('"content"'))) {
+        const fallbackContent = clean.replace(/[{}\"\']/g, "").replace(/\b(?:role|content|assistant)\s*:\s*/gi, "").trim();
+        if (fallbackContent) {
+            return {
+                reply: fallbackContent,
+                voice_summary: null,
+                action: null,
+                actions: []
+            };
+        }
     }
 
     if (clean && clean.length > 3) {
@@ -1054,10 +1241,15 @@ export async function askAiCopilot(env, userQuery, context) {
 
     if (env.GEMINI_API_KEY) {
         // Prioritize ultra-fast flash-lite models for sub-second conversational latency
+        const explicitModel = env?.GEMINI_MODEL;
+        const baseModels = GEMINI_MODELS.filter(m => m !== "gemini-3-flash-preview");
+        const liteModels = baseModels.filter(m => m.includes("lite"));
+        const otherModels = baseModels.filter(m => !m.includes("lite"));
         const candidateModels = Array.from(new Set([
-            env?.GEMINI_MODEL,
-            ...GEMINI_MODELS
-        ].filter(Boolean).filter(m => m !== "gemini-3-flash-preview")));
+            explicitModel,
+            ...liteModels,
+            ...otherModels
+        ].filter(Boolean)));
 
         // Dynamic temperature: higher for creative/casual queries, balanced for general copilot questions
         const isCreativeQuery = /\b(joke|funny|laugh|story|say anything|chat|talk to me|how are you|who are you|bored|poem|quote|opinion)\b/i.test(userQuery);
@@ -1091,7 +1283,7 @@ export async function askAiCopilot(env, userQuery, context) {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: requestBody,
-                    signal: AbortSignal.timeout(7000)
+                    signal: AbortSignal.timeout(4000)
                 });
 
                 // Fallback to monolithic prompt if model rejects tools or system_instruction
@@ -1107,7 +1299,7 @@ export async function askAiCopilot(env, userQuery, context) {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: fallbackBody,
-                        signal: AbortSignal.timeout(12000)
+                        signal: AbortSignal.timeout(5000)
                     });
                 }
 

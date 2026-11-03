@@ -5,7 +5,9 @@ import {
     askAiCopilot,
     parseExtractedPdfStatementJson,
     parseStatementOrInvoicePdfWithGemini,
-    buildAiUserContext
+    buildAiUserContext,
+    shouldPerformHistoricalSearch,
+    parseCopilotResponse
 } from "../src/services/ai.js";
 import {
     searchWorkLogs,
@@ -280,6 +282,74 @@ describe("Core AI & Agentic Intelligence Adjustments", () => {
             expect(ctx.budget.limitUsd).toBe(200);
             expect(ctx.budget.daysRemainingInMonth).toBeGreaterThan(0);
             expect(ctx.budget.safeDailyLimitUsd).toBeGreaterThan(0);
+        });
+
+        it("buildAiUserContext should utilize atomic db.batch when supported by D1", async () => {
+            const batchSpy = vi.fn().mockResolvedValue([
+                { results: [{ display_currency: "USD", monthly_budget: 400000 }] },
+                { results: [{ type: "expense", currency: "USD", total: 10 }] },
+                { results: [{ type: "expense", currency: "USD", total: 50 }] },
+                { results: [{ type: "expense", currency: "USD", total: 100 }] },
+                { results: [{ category: "Food", total_khr: 40000 }] },
+                { results: [{ category: "Coffee", total_khr: 12000 }] },
+                { results: [{ id: 1, amount: 3.5, currency: "USD", category: "Coffee" }] },
+                { results: [{ time: "09:00", category: "Dev", content: "Morning standup" }] },
+                { results: [{ date: "2026-11-02", time: "17:00", category: "Dev", content: "Shipped PR" }] },
+                { results: [{ title: "Team sync", reminder_time: "14:00", frequency: "daily" }] },
+                { results: [{ id: 1, role: "user", content: "Hello" }] },
+                { results: [{ id: 1, category: "preference", fact: "Prefers concise answers" }] }
+            ]);
+
+            const mockDb = {
+                batch: batchSpy,
+                prepare: vi.fn().mockReturnValue({
+                    bind: vi.fn().mockReturnValue({})
+                })
+            };
+
+            const ctx = await buildAiUserContext(mockDb, "user_boss", "hello friday");
+            expect(batchSpy).toHaveBeenCalled();
+            expect(ctx.budget.limitUsd).toBe(100);
+            expect(ctx.totals.todayExpenseUsd).toBe(10);
+            expect(ctx.userMemories.length).toBe(1);
+            expect(ctx.userMemories[0].fact).toBe("Prefers concise answers");
+        });
+
+        it("shouldPerformHistoricalSearch accurately gates expensive multi-table FTS5 scans", () => {
+            // Historical queries should trigger FTS5 search
+            expect(shouldPerformHistoricalSearch("When was the last time I went to Brown Coffee?")).toBe(true);
+            expect(shouldPerformHistoricalSearch("Did I buy groceries last week?")).toBe(true);
+            expect(shouldPerformHistoricalSearch("How much did I spend on Grab this month?")).toBe(true);
+            expect(shouldPerformHistoricalSearch("Recall my notes about server architecture")).toBe(true);
+            expect(shouldPerformHistoricalSearch("Search past expenses for flight tickets")).toBe(true);
+
+            // Routine messages & general chat should bypass FTS5 scans to save latency
+            expect(shouldPerformHistoricalSearch("hi")).toBe(false);
+            expect(shouldPerformHistoricalSearch("Hello Friday, good morning!")).toBe(false);
+            expect(shouldPerformHistoricalSearch("What is the capital of France?")).toBe(false);
+            expect(shouldPerformHistoricalSearch("Tell me a funny joke")).toBe(false);
+            expect(shouldPerformHistoricalSearch("Who are you?")).toBe(false);
+        });
+
+        it("parseCopilotResponse gracefully handles malformed JSON with unescaped newlines and role envelopes", () => {
+            // Malformed JSON with literal newline inside string (exact user screenshot scenario)
+            const malformedScreenshotJson = `{\n  "role": "assistant",\n  "content": "Hello, Boss. I'm online and ready whenever you need me.\nWhat's on the agenda for today?"\n}`;
+            const parsed = parseCopilotResponse(malformedScreenshotJson);
+
+            expect(parsed).toBeDefined();
+            expect(parsed.reply).toBe("Hello, Boss. I'm online and ready whenever you need me.\nWhat's on the agenda for today?");
+            expect(parsed.reply).not.toContain('"role"');
+            expect(parsed.reply).not.toContain('"assistant"');
+            expect(parsed.reply).not.toContain("{");
+
+            // Standard valid copilot JSON
+            const standardJson = JSON.stringify({
+                reply: "Good morning Boss!",
+                voice_summary: "Good morning Boss!",
+                action: null
+            });
+            const parsedStd = parseCopilotResponse(standardJson);
+            expect(parsedStd.reply).toBe("Good morning Boss!");
         });
     });
 
