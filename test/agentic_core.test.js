@@ -795,4 +795,33 @@ describe("Core AI & Agentic Intelligence Adjustments", () => {
             expect(contents[contents.length - 1].parts[0].text).toBe("Query 10");
         });
     });
+
+    describe("8. Deep Thought No-Fallback Protocol (/think)", () => {
+        it("should return quota limit message without falling back when thinking models return 429", async () => {
+            fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+                Promise.resolve(new Response(JSON.stringify({
+                    error: { code: 429, message: "Resource exhausted" }
+                }), { status: 429, headers: { "Content-Type": "application/json" } }))
+            );
+
+            const env = { GEMINI_API_KEY: "mock_key", AI: { run: vi.fn() } };
+            const context = {
+                userId: "user_boss",
+                isOwner: true,
+                userName: "Boss",
+                isThinking: true,
+                chatHistory: []
+            };
+
+            const result = await askAiCopilot(env, "Analyze my financial runway", context);
+
+            // Must NOT call Workers AI as fallback
+            expect(env.AI.run).not.toHaveBeenCalled();
+            // Must return informative quota limit message
+            expect(result).toBeDefined();
+            expect(result.quotaExhausted).toBe(true);
+            expect(result.reply).toContain("Quota Limit Reached");
+            expect(result.reply).toContain("no fallback model was used");
+        });
+    });
 });

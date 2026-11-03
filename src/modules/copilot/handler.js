@@ -394,14 +394,25 @@ export async function handleAiCopilotQuery(env, chatId, userId, query, from, mes
         }
 
         // Resilient deterministic fallback: Friday always answers using local database math
+        // (Skipped for /think queries where user explicitly requires no fallback)
         if (!result || !result.reply) {
-            const localFallback = buildSmartLocalFallback(cleanQuery, context);
-            result = {
-                reply: localFallback.reply,
-                voice_summary: localFallback.voice_summary,
-                action: localFallback.action || null,
-                actions: localFallback.actions || (localFallback.action ? [localFallback.action] : [])
-            };
+            if (isThinking) {
+                const addressTitle = isUserOwner !== false ? "Boss" : (requesterName || "there");
+                result = {
+                    reply: `🧠 *F.R.I.D.A.Y. Deep Thought • Service Limit*\n\n${addressTitle}, the flagship reasoning engine is currently unavailable. As requested, no fallback model was used. Please try again shortly or use standard chat without \`/think\`.`,
+                    voice_summary: "The reasoning engine is currently unavailable. No fallback was used.",
+                    action: null,
+                    actions: []
+                };
+            } else {
+                const localFallback = buildSmartLocalFallback(cleanQuery, context);
+                result = {
+                    reply: localFallback.reply,
+                    voice_summary: localFallback.voice_summary,
+                    action: localFallback.action || null,
+                    actions: localFallback.actions || (localFallback.action ? [localFallback.action] : [])
+                };
+            }
         }
 
         // Process all actions (supporting single action, array of actions, and corrective actions)

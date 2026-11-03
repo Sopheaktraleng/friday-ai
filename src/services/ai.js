@@ -1261,16 +1261,17 @@ export async function askAiCopilot(env, userQuery, context) {
         let candidateModels;
         let timeoutMs;
         let temperature;
+        let lastQuotaError = null;
 
         if (isThinkingMode) {
-            // Flagship reasoning brain: 3.6-flash, 3.5-flash with fast models as safe fallback
+            // Flagship reasoning brain ONLY: gemini-3.6-flash, gemini-3.5-flash
+            // NO fallback to fast models if thinking runs out of tokens/quota
             const thinkingExplicit = env?.GEMINI_THINKING_MODEL || explicitModel;
             candidateModels = Array.from(new Set([
                 thinkingExplicit,
-                ...GEMINI_THINKING_MODELS,
-                ...GEMINI_FAST_MODELS
+                ...GEMINI_THINKING_MODELS
             ].filter(Boolean)));
-            timeoutMs = 6500; // Cap per-model attempt to 6.5s to prevent cloudflare/webhook timeouts
+            timeoutMs = 7000;
             temperature = 0.35; // Focused, analytical precision
         } else {
             // Ultra-fast conversational brain: sub-second flash-lite models with heavy models as fallback
@@ -1340,8 +1341,13 @@ export async function askAiCopilot(env, userQuery, context) {
                 }
 
                 if (!resp.ok) {
-                    const errText = await resp.text();
-                    console.warn(`Gemini Copilot model ${model} failed (${resp.status}):`, errText);
+                    const errText = await resp.text().catch(() => "");
+                    if (resp.status === 429) {
+                        console.warn(`Gemini Copilot model ${model} quota exhausted (429):`, errText);
+                        lastQuotaError = { model, status: 429, message: errText };
+                    } else {
+                        console.warn(`Gemini Copilot model ${model} failed (${resp.status}):`, errText);
+                    }
                     continue;
                 }
 
@@ -1463,9 +1469,29 @@ export async function askAiCopilot(env, userQuery, context) {
                 console.warn(`Gemini Copilot error with ${model}:`, err.message);
             }
         }
+
+        if (isThinkingMode) {
+            const isOwner = context?.isOwner !== false;
+            const addressTitle = isOwner ? "Boss" : (context?.userName || "there");
+            if (lastQuotaError) {
+                return {
+                    reply: `🧠 *F.R.I.D.A.Y. Deep Thought • Quota Limit Reached*\n\n${addressTitle}, the reasoning token quota for the flagship model (*${lastQuotaError.model}*) has been exhausted on your Gemini API key for today.\n\n• *Daily Limit:* 20 reasoning queries per day on the Google AI Free Tier.\n• *Protocol:* As instructed, no fallback model was used.\n• *Standard Access:* General questions, expense tracking, and assistant tasks without \`/think\` remain 100% active at sub-second speed.`,
+                    voice_summary: `${addressTitle}, the reasoning token quota has been exhausted for today. Please use regular chat without think command.`,
+                    action: null,
+                    actions: [],
+                    quotaExhausted: true
+                };
+            }
+            return {
+                reply: `🧠 *F.R.I.D.A.Y. Deep Thought • Service Unavailable*\n\n${addressTitle}, the flagship reasoning engine did not return a response in time. As requested, no fallback model was used. Please try again shortly or use regular chat without \`/think\`.`,
+                voice_summary: `${addressTitle}, the reasoning engine did not respond in time.`,
+                action: null,
+                actions: []
+            };
+        }
     }
 
-    if (env.AI) {
+    if (env.AI && !context?.isThinking) {
         try {
             const historyMessages = (context?.chatHistory || []).map(m => ({
                 role: m.role === "model" ? "assistant" : "user",

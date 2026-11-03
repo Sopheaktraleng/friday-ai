@@ -12,9 +12,7 @@ export const GEMINI_FAST_MODELS = [
 // Flagship high-intelligence reasoning models for /think queries (free tier accessible)
 export const GEMINI_THINKING_MODELS = [
     "gemini-3.6-flash",         // Primary flagship reasoning engine (600+ thought tokens)
-    "gemini-flash-lite-latest", // High-quota instant fallback (1,500/day free quota, ~1.5s - immune to 429/503 stalls)
-    "gemini-3.5-flash-lite",    // Speed fallback
-    "gemini-3.5-flash"          // Deep intelligence fallback
+    "gemini-3.5-flash"          // Deep intelligence reasoning
 ];
 
 // Unified production models
