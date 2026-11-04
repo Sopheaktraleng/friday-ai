@@ -7,7 +7,8 @@ import {
     buildAiUserContext,
     shouldPerformHistoricalSearch,
     parseCopilotResponse,
-    buildGeminiContents
+    buildGeminiContents,
+    buildOpenAiMessages
 } from "../src/services/ai.js";
 import {
     searchWorkLogs,
@@ -815,6 +816,121 @@ describe("Core AI & Agentic Intelligence Adjustments", () => {
             expect(result.quotaExhausted).toBe(true);
             expect(result.reply).toContain("Quota Limit Reached");
             expect(result.reply).toContain("no fallback model was used");
+        });
+    });
+
+    describe("9. Multi-AI Specialist Routing Architecture", () => {
+        it("buildOpenAiMessages should format system, assistant, and user turns", () => {
+            const history = [
+                { role: "user", content: "Spent 5 on coffee" },
+                { role: "model", content: "Logged $5 coffee" }
+            ];
+            const msgs = buildOpenAiMessages(history, "What did I just log?", "You are F.R.I.D.A.Y.");
+            expect(msgs).toHaveLength(4);
+            expect(msgs[0]).toEqual({ role: "system", content: "You are F.R.I.D.A.Y." });
+            expect(msgs[1]).toEqual({ role: "user", content: "Spent 5 on coffee" });
+            expect(msgs[2]).toEqual({ role: "assistant", content: "Logged $5 coffee" });
+            expect(msgs[3]).toEqual({ role: "user", content: "What did I just log?" });
+        });
+
+        it("askAiCopilot should prioritize Groq LPU engine for fast routine queries when GROQ_API_KEY is present", async () => {
+            fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+                if (String(url).includes("groq.com")) {
+                    return new Response(JSON.stringify({
+                        choices: [{
+                            message: {
+                                content: JSON.stringify({
+                                    reply: "Boom, $5 coffee logged instantly via Groq!",
+                                    actions: [{ type: "add_expense", amount: 5, category: "Coffee" }]
+                                })
+                            }
+                        }]
+                    }), { status: 200, headers: { "Content-Type": "application/json" } });
+                }
+                return new Response("{}", { status: 500 });
+            });
+
+            const env = {
+                GROQ_API_KEY: "mock_groq_key",
+                GEMINI_API_KEY: "mock_gemini_key"
+            };
+            const context = { isThinking: false, chatHistory: [] };
+            const result = await askAiCopilot(env, "I spent 5$ on coffee", context);
+
+            expect(result).toBeDefined();
+            expect(result.engine).toBe("groq");
+            expect(result.reply).toContain("Groq");
+            expect(result.actions).toHaveLength(1);
+            expect(result.actions[0].type).toBe("add_expense");
+        });
+
+        it("askAiCopilot should seamlessly cascade to Gemini if Groq encounters an error", async () => {
+            let groqAttempted = false;
+            let geminiAttempted = false;
+
+            fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+                const urlStr = String(url);
+                if (urlStr.includes("groq.com")) {
+                    groqAttempted = true;
+                    return new Response("Rate limit exceeded", { status: 429 });
+                }
+                if (urlStr.includes("generativelanguage.googleapis.com")) {
+                    geminiAttempted = true;
+                    return new Response(JSON.stringify({
+                        candidates: [{
+                            content: {
+                                parts: [{
+                                    text: JSON.stringify({
+                                        reply: "Logged via Gemini fallback",
+                                        actions: []
+                                    })
+                                }]
+                            }
+                        }]
+                    }), { status: 200, headers: { "Content-Type": "application/json" } });
+                }
+                return new Response("{}", { status: 500 });
+            });
+
+            const env = {
+                GROQ_API_KEY: "mock_groq_key",
+                GEMINI_API_KEY: "mock_gemini_key"
+            };
+            const context = { isThinking: false, chatHistory: [] };
+            const result = await askAiCopilot(env, "Check budget", context);
+
+            expect(groqAttempted).toBe(true);
+            expect(geminiAttempted).toBe(true);
+            expect(result.reply).toBe("Logged via Gemini fallback");
+        });
+
+        it("askAiCopilot should route /think queries to OpenRouter reasoning engine when OPENROUTER_API_KEY is present", async () => {
+            fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+                if (String(url).includes("openrouter.ai")) {
+                    return new Response(JSON.stringify({
+                        choices: [{
+                            message: {
+                                content: JSON.stringify({
+                                    reply: "Deep analysis: Your runway is 14 months.",
+                                    actions: []
+                                })
+                            }
+                        }]
+                    }), { status: 200, headers: { "Content-Type": "application/json" } });
+                }
+                return new Response("{}", { status: 500 });
+            });
+
+            const env = {
+                OPENROUTER_API_KEY: "mock_openrouter_key",
+                GEMINI_API_KEY: "mock_gemini_key"
+            };
+            const context = { isThinking: true, chatHistory: [] };
+            const result = await askAiCopilot(env, "Analyze my financial runway", context);
+
+            expect(result).toBeDefined();
+            expect(result.engine).toBe("openrouter");
+            expect(result.reply).toContain("runway is 14 months");
         });
     });
 });

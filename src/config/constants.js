@@ -1,6 +1,20 @@
 export const TIME_ZONE = "Asia/Phnom_Penh";
 export const EXCHANGE_RATE = 4000; // 1 USD = 4000 KHR
 
+// High-speed conversational models on Groq (LPU accelerated ~500 tok/sec)
+export const GROQ_MODELS = [
+    "openai/gpt-oss-120b",
+    "qwen/qwen3.8-27b",
+    "openai/gpt-oss-20b"
+];
+
+// OpenRouter free tier models for deep thought and reasoning
+export const OPENROUTER_MODELS = [
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    "google/gemma-4-31b-it:free",
+    "liquid/lfm-2.5-2.6b:free"
+];
+
 // Fast & reliable models for general routine questions (~800ms - 1s)
 export const GEMINI_FAST_MODELS = [
     "gemini-flash-lite-latest", // Sub-second conversational speed (~800ms) & high free-tier quota

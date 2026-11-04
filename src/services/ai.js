@@ -1,4 +1,4 @@
-import { TIME_ZONE, EXCHANGE_RATE, GEMINI_MODELS, GEMINI_FAST_MODELS, GEMINI_THINKING_MODELS, isOwner } from "../config/constants.js";
+import { TIME_ZONE, EXCHANGE_RATE, GEMINI_MODELS, GEMINI_FAST_MODELS, GEMINI_THINKING_MODELS, GROQ_MODELS, OPENROUTER_MODELS, isOwner } from "../config/constants.js";
 import { today, currentTime, monthPrefix, normalizeReminderTime } from "../utils/time.js";
 import { cleanMd, normalizeCategory } from "../utils/format.js";
 import { arrayBufferToBase64 } from "../utils/crypto.js";
@@ -1251,11 +1251,141 @@ export async function executeCopilotTool(db, userId, chatId, toolName, toolArgs 
     }
 }
 
+/**
+ * Builds OpenAI-compatible chat messages format (used by Groq and OpenRouter).
+ */
+export function buildOpenAiMessages(chatHistory = [], currentQuery, systemPrompt = "") {
+    const messages = [];
+    if (systemPrompt && typeof systemPrompt === "string") {
+        messages.push({ role: "system", content: systemPrompt });
+    }
+    for (const h of chatHistory) {
+        if (!h.content) continue;
+        const role = (h.role === "model" || h.role === "assistant") ? "assistant" : "user";
+        messages.push({ role, content: h.content });
+    }
+    messages.push({ role: "user", content: currentQuery });
+    return messages;
+}
+
+/**
+ * Robust dispatcher for OpenAI-compatible LLM endpoints (Groq LPU and OpenRouter).
+ */
+export async function callOpenAiCompatibleApi({
+    apiKey,
+    baseUrl = "https://api.groq.com/openai/v1",
+    models = [],
+    messages = [],
+    temperature = 0.2,
+    jsonMode = true,
+    timeoutMs = 4500
+}) {
+    if (!apiKey || !Array.isArray(models) || models.length === 0) return null;
+
+    for (const model of models) {
+        try {
+            const body = {
+                model,
+                messages,
+                temperature
+            };
+            if (jsonMode) {
+                body.response_format = { type: "json_object" };
+            }
+
+            const cleanUrl = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
+            const resp = await fetch(cleanUrl, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${apiKey}`,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(body),
+                signal: AbortSignal.timeout(timeoutMs)
+            });
+
+            if (!resp.ok) {
+                const errText = await resp.text().catch(() => "");
+                console.warn(`OpenAI-compatible model ${model} failed (${resp.status}):`, errText);
+                continue;
+            }
+
+            const resJson = await resp.json();
+            const text = resJson?.choices?.[0]?.message?.content?.trim();
+            if (text) {
+                return { text, model };
+            }
+        } catch (err) {
+            console.warn(`OpenAI-compatible request error on ${model}:`, err.message);
+        }
+    }
+
+    return null;
+}
+
 export async function askAiCopilot(env, userQuery, context) {
     const prompt = buildCopilotPrompt(userQuery, context);
+    const isThinkingMode = context?.isThinking === true;
+
+    // 1. FAST PERFORMANCE ENGINE: Groq LPU (~250-500ms) for routine chat, logging, and questions
+    if (!isThinkingMode && env?.GROQ_API_KEY) {
+        try {
+            const groqMessages = buildOpenAiMessages(context?.chatHistory || [], userQuery, prompt);
+            const groqRes = await callOpenAiCompatibleApi({
+                apiKey: env.GROQ_API_KEY,
+                baseUrl: "https://api.groq.com/openai/v1",
+                models: [env?.GROQ_MODEL, ...GROQ_MODELS].filter(Boolean),
+                messages: groqMessages,
+                temperature: 0.2,
+                jsonMode: true,
+                timeoutMs: 3500
+            });
+
+            if (groqRes && groqRes.text) {
+                const parsed = parseCopilotResponse(groqRes.text);
+                if (parsed && (parsed.reply || (parsed.actions && parsed.actions.length > 0))) {
+                    return {
+                        ...parsed,
+                        engine: "groq",
+                        model: groqRes.model
+                    };
+                }
+            }
+        } catch (groqErr) {
+            console.warn("Groq fast copilot error, cascading to Gemini:", groqErr.message);
+        }
+    }
+
+    // 2. DEEP THINKING ENGINE: OpenRouter reasoning for /think queries
+    if (isThinkingMode && env?.OPENROUTER_API_KEY) {
+        try {
+            const orMessages = buildOpenAiMessages(context?.chatHistory || [], userQuery, prompt);
+            const orRes = await callOpenAiCompatibleApi({
+                apiKey: env.OPENROUTER_API_KEY,
+                baseUrl: "https://openrouter.ai/api/v1",
+                models: [env?.OPENROUTER_MODEL, ...OPENROUTER_MODELS].filter(Boolean),
+                messages: orMessages,
+                temperature: 0.4,
+                jsonMode: true,
+                timeoutMs: 6500
+            });
+
+            if (orRes && orRes.text) {
+                const parsed = parseCopilotResponse(orRes.text);
+                if (parsed && (parsed.reply || (parsed.actions && parsed.actions.length > 0))) {
+                    return {
+                        ...parsed,
+                        engine: "openrouter",
+                        model: orRes.model
+                    };
+                }
+            }
+        } catch (orErr) {
+            console.warn("OpenRouter deep thinking error, cascading to Gemini:", orErr.message);
+        }
+    }
 
     if (env.GEMINI_API_KEY) {
-        const isThinkingMode = context?.isThinking === true;
         const explicitModel = env?.GEMINI_MODEL;
         
         let candidateModels;
