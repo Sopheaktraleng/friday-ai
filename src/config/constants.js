@@ -1,11 +1,17 @@
 export const TIME_ZONE = "Asia/Phnom_Penh";
 export const EXCHANGE_RATE = 4000; // 1 USD = 4000 KHR
 
-// High-speed conversational models on Groq (LPU accelerated ~500 tok/sec)
+// High-speed conversational models on Groq for routine chat & quick tasks (~200ms)
 export const GROQ_MODELS = [
-    "openai/gpt-oss-120b",
     "qwen/qwen3.8-27b",
+    "openai/gpt-oss-120b",
     "openai/gpt-oss-20b"
+];
+
+// Flagship deep reasoning models on Groq for /think queries (maximum accuracy MoE)
+export const GROQ_THINKING_MODELS = [
+    "openai/gpt-oss-120b",
+    "qwen/qwen3.8-27b"
 ];
 
 // OpenRouter free tier models for deep thought and reasoning

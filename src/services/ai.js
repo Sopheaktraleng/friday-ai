@@ -1,4 +1,4 @@
-import { TIME_ZONE, EXCHANGE_RATE, GEMINI_MODELS, GEMINI_FAST_MODELS, GEMINI_THINKING_MODELS, GROQ_MODELS, OPENROUTER_MODELS, isOwner } from "../config/constants.js";
+import { TIME_ZONE, EXCHANGE_RATE, GEMINI_MODELS, GEMINI_FAST_MODELS, GEMINI_THINKING_MODELS, GROQ_MODELS, GROQ_THINKING_MODELS, OPENROUTER_MODELS, isOwner } from "../config/constants.js";
 import { today, currentTime, monthPrefix, normalizeReminderTime } from "../utils/time.js";
 import { cleanMd, normalizeCategory } from "../utils/format.js";
 import { arrayBufferToBase64 } from "../utils/crypto.js";
@@ -1335,7 +1335,7 @@ export async function askAiCopilot(env, userQuery, context) {
                 const groqRes = await callOpenAiCompatibleApi({
                     apiKey: env.GROQ_API_KEY,
                     baseUrl: "https://api.groq.com/openai/v1",
-                    models: [env?.GROQ_THINKING_MODEL, "openai/gpt-oss-120b", "qwen/qwen3.8-27b"].filter(Boolean),
+                    models: [env?.GROQ_THINKING_MODEL, ...GROQ_THINKING_MODELS].filter(Boolean),
                     messages: groqThinkingMessages,
                     temperature: 0.25,
                     jsonMode: true,
