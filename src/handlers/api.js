@@ -74,47 +74,47 @@ export async function handleApiRequest(request, env) {
             if (hasFinance) {
                 // Optimized: Single SQL query with GROUP BY instead of 7 sequential roundtrips
                 const past7Days = [];
-            for (let i = 6; i >= 0; i--) {
-                past7Days.push(dateDaysAgo(i));
+                for (let i = 6; i >= 0; i--) {
+                    past7Days.push(dateDaysAgo(i));
+                }
+                const minDate = past7Days[0];
+                const maxDate = past7Days[past7Days.length - 1];
+
+                const dayRows = await env.DB.prepare(
+                    `SELECT date, COALESCE(SUM(CASE WHEN currency = 'USD' THEN amount * ${EXCHANGE_RATE} ELSE amount END), 0) AS total
+                     FROM expenses
+                     WHERE user_id = ? AND type = 'expense' AND date >= ? AND date <= ?
+                     GROUP BY date`
+                )
+                .bind(userId, minDate, maxDate)
+                .all();
+
+                const totalsMap = new Map((dayRows.results || []).map(r => [r.date, Number(r.total || 0)]));
+                daily = past7Days.map(d => ({
+                    date: d,
+                    total: totalsMap.get(d) || 0,
+                }));
+
+                recentRows = await env.DB.prepare(
+                    `SELECT id, amount, category, type, currency, date, created_at
+                     FROM expenses
+                     WHERE user_id = ?
+                     ORDER BY date DESC, id DESC
+                     LIMIT 10`
+                )
+                .bind(userId)
+                .all();
+
+                const settingsRow = await env.DB.prepare(
+                    "SELECT monthly_budget FROM user_settings WHERE user_id = ?"
+                )
+                .bind(userId)
+                .first();
+                budgetKhr = settingsRow?.monthly_budget || 0;
+
+                const monthSummary = await getFinancialSummary(env.DB, userId, "month");
+                monthExpenseKhr = monthSummary?.totalExpenseInKhr || 0;
             }
-            const minDate = past7Days[0];
-            const maxDate = past7Days[past7Days.length - 1];
-
-            const dayRows = await env.DB.prepare(
-                `SELECT date, COALESCE(SUM(CASE WHEN currency = 'USD' THEN amount * ${EXCHANGE_RATE} ELSE amount END), 0) AS total
-                 FROM expenses
-                 WHERE user_id = ? AND type = 'expense' AND date >= ? AND date <= ?
-                 GROUP BY date`
-            )
-            .bind(userId, minDate, maxDate)
-            .all();
-
-            const totalsMap = new Map((dayRows.results || []).map(r => [r.date, Number(r.total || 0)]));
-            const daily = past7Days.map(d => ({
-                date: d,
-                total: totalsMap.get(d) || 0,
-            }));
-
-            const recentRows = await env.DB.prepare(
-                `SELECT id, amount, category, type, currency, date, created_at
-                 FROM expenses
-                 WHERE user_id = ?
-                 ORDER BY date DESC, id DESC
-                 LIMIT 10`
-            )
-            .bind(userId)
-            .all();
-
-            const settingsRow = await env.DB.prepare(
-                "SELECT monthly_budget FROM user_settings WHERE user_id = ?"
-            )
-            .bind(userId)
-            .first();
-            const budgetKhr = settingsRow?.monthly_budget || 0;
-
-            const monthSummary = await getFinancialSummary(env.DB, userId, "month");
-            monthExpenseKhr = monthSummary?.totalExpenseInKhr || 0;
-        }
 
         const activeReminder = hasReminders ? await env.DB.prepare(
             "SELECT id, title, reminder_time, frequency, type, is_active FROM reminders WHERE user_id = ? AND is_active = 1 ORDER BY (CASE WHEN type = 'lunchbox' THEN 0 ELSE 1 END), id ASC LIMIT 1"

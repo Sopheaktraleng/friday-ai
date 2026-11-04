@@ -1,6 +1,30 @@
-const token = process.env.TELEGRAM_BOT_TOKEN;
-const workerUrl = process.env.WORKER_URL;
-const secret = process.env.WEBHOOK_SECRET;
+import fs from "node:fs";
+import path from "node:path";
+
+let token = process.env.TELEGRAM_BOT_TOKEN;
+let workerUrl = process.env.WORKER_URL;
+let secret = process.env.WEBHOOK_SECRET;
+
+if (!token || !workerUrl || !secret) {
+    try {
+        const devVarsPath = path.resolve(process.cwd(), ".dev.vars");
+        if (fs.existsSync(devVarsPath)) {
+            const content = fs.readFileSync(devVarsPath, "utf8");
+            for (const line of content.split("\n")) {
+                const trimmed = line.trim();
+                if (!token && trimmed.startsWith("TELEGRAM_BOT_TOKEN=")) {
+                    token = trimmed.split("=")[1].trim();
+                }
+                if (!workerUrl && trimmed.startsWith("WORKER_URL=")) {
+                    workerUrl = trimmed.split("=")[1].trim();
+                }
+                if (!secret && trimmed.startsWith("WEBHOOK_SECRET=")) {
+                    secret = trimmed.split("=")[1].trim();
+                }
+            }
+        }
+    } catch (_) {}
+}
 
 if (!token) {
     console.error("Missing TELEGRAM_BOT_TOKEN.");

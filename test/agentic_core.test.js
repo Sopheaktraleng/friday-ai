@@ -4,7 +4,6 @@ import {
     executeCopilotTool,
     askAiCopilot,
     parseExtractedPdfStatementJson,
-    parseStatementOrInvoicePdfWithGemini,
     buildAiUserContext,
     shouldPerformHistoricalSearch,
     parseCopilotResponse,
@@ -13,19 +12,13 @@ import {
 import {
     searchWorkLogs,
     searchUserMemories,
-    searchLedger,
     searchHistoricalRecords,
     savePendingStatement,
     getPendingStatement,
-    deletePendingStatement,
     importPendingStatementTransactions
 } from "../src/db/queries.js";
 import {
-    handlePdfDocument,
-    handleStatementImport,
-    handleStatementViewBreakdown,
-    handleStatementDiscard,
-    renderPendingStatementCard
+    handlePdfDocument
 } from "../src/modules/finance/scanner.js";
 import { handleMessage } from "../src/handlers/message.js";
 import { handleCallback } from "../src/handlers/callback.js";

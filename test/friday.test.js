@@ -5,13 +5,8 @@ import { sendFridayTacticalBriefing, sendFridayWakeupCall, sendDailyScheduledWak
 import { handleMessage, handleUndoLastTransaction } from "../src/handlers/message.js";
 import { buildSmartLocalFallback } from "../src/modules/copilot/handler.js";
 import {
-    saveChatMessage,
     getRecentChatHistory,
-    clearChatHistory,
     saveUserMemory,
-    getUserMemories,
-    deleteUserMemory,
-    clearUserMemories,
     deleteLastTransaction,
     claimDailyBroadcast
 } from "../src/db/queries.js";

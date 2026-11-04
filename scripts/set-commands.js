@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { getUserCommandList } from "../src/services/telegram.js";
 
 let token = process.env.TELEGRAM_BOT_TOKEN;
 let ownerId = process.env.OWNER_ID || process.env.OWNER_TELEGRAM_ID || "849550186";
@@ -26,30 +27,6 @@ if (!token) {
 if (!token) {
     console.error("Missing TELEGRAM_BOT_TOKEN. Provide it via env or .dev.vars");
     process.exit(1);
-}
-
-export function getUserCommandList(permissions, isBoss = false) {
-    const permList = (permissions || "finance,tasks,reminders,ai_dialog").split(",").map(p => p.trim().toLowerCase());
-    const hasPerm = (f) => isBoss || permList.includes(f) || permList.includes("all") || permList.includes("*");
-
-    const commands = [{ command: "hub", description: "🏠 Open Command Center" }];
-    if (isBoss) commands.push({ command: "users", description: "👥 Manage Guests & Approvals" });
-    if (hasPerm("ai_dialog")) commands.push({ command: "search", description: "🌐 Live Google Search Grounding" });
-    if (hasPerm("finance")) {
-        commands.push(
-            { command: "today", description: "📊 Today Expenses & Balance" },
-            { command: "summary", description: "💳 Monthly Spending Summary" }
-        );
-    }
-    if (hasPerm("tasks")) commands.push({ command: "tasks", description: "📋 Today Completed Tasks" });
-    if (hasPerm("ai_dialog")) {
-        commands.push({ command: "voice", description: "🎙️ Voice Modes & Settings" });
-    }
-    commands.push(
-        { command: "settings", description: "⚙️ Currency & Budget Settings" },
-        { command: "help", description: "💡 Quick Guide & Shortcuts" }
-    );
-    return commands;
 }
 
 export const GUEST_COMMANDS = getUserCommandList("finance,tasks,reminders,ai_dialog", false);

@@ -1,5 +1,4 @@
 export const TIME_ZONE = "Asia/Phnom_Penh";
-export const CURRENCY = "KHR";
 export const EXCHANGE_RATE = 4000; // 1 USD = 4000 KHR
 
 // Fast & reliable models for general routine questions (~800ms - 1s)
@@ -106,13 +105,6 @@ export async function isUserAuthorizedAsync(db, userId, env = {}) {
     }
     return false;
 }
-
-export const AVAILABLE_FEATURES = [
-    { id: "finance", name: "Finance Hub & Logging", icon: "💳" },
-    { id: "tasks", name: "Task & Work Logging", icon: "📋" },
-    { id: "reminders", name: "Reminders & Alarms", icon: "⏰" },
-    { id: "ai_dialog", name: "AI Assistant & Dialog", icon: "🤖" }
-];
 
 export const DEFAULT_GUEST_PERMISSIONS = "finance,tasks,reminders,ai_dialog";
 

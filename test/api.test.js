@@ -90,6 +90,41 @@ describe("API Authentication Handler", () => {
             expect(data.activeReminder).toBeNull();
         });
 
+        it("/api/data should correctly return populated daily, recent, and budgetKhr without variable shadowing", async () => {
+            const req = new Request("http://localhost:8787/api/data?user_id=849550186", {
+                headers: { host: "localhost:8787" }
+            });
+            const env = {
+                TELEGRAM_BOT_TOKEN: "mock_token",
+                OWNER_ID: "849550186",
+                ALLOWED_USER_IDS: "849550186",
+                DB: {
+                    prepare: vi.fn().mockImplementation((query) => ({
+                        bind: vi.fn().mockImplementation(() => ({
+                            first: vi.fn().mockImplementation(async () => {
+                                if (query.includes("FROM user_settings")) return { monthly_budget: 500000 };
+                                return null;
+                            }),
+                            all: vi.fn().mockImplementation(async () => {
+                                if (query.includes("GROUP BY date")) return { results: [{ date: "2026-11-04", total: 10000 }] };
+                                if (query.includes("LIMIT 10")) return { results: [{ id: 1, amount: 2.5, category: "Coffee" }] };
+                                return { results: [] };
+                            }),
+                            run: vi.fn().mockResolvedValue({ meta: { changes: 1 } })
+                        }))
+                    }))
+                }
+            };
+
+            const resp = await handleApiRequest(req, env);
+            expect(resp.status).toBe(200);
+            const data = await resp.json();
+            expect(data.budgetKhr).toBe(500000);
+            expect(data.recent).toHaveLength(1);
+            expect(data.recent[0].category).toBe("Coffee");
+            expect(data.daily).toHaveLength(7);
+        });
+
         it("/api/reminders should return 403 Forbidden when reminders is disabled", async () => {
             const req = new Request("http://localhost:8787/api/reminders?user_id=777888", {
                 headers: { host: "localhost:8787" }

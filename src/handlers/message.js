@@ -1,6 +1,6 @@
 import { today, dateDaysAgo } from "../utils/time.js";
 import { formatAmount, formatMoney, cleanMd, capitalize } from "../utils/format.js";
-import { isUserAuthorized, isUserAuthorizedAsync, isOwner, OWNER_USER_ID, hasUserPermission, formatUserPermissionsSummary } from "../config/constants.js";
+import { isUserAuthorizedAsync, isOwner, hasUserPermission, formatUserPermissionsSummary } from "../config/constants.js";
 import { telegram, sendMessage, sendTelegramVoice, syncBotCommands, syncUserBotCommands } from "../services/telegram.js";
 import { generateSpeechAudio, askGeminiWithGoogleSearch } from "../services/ai.js";
 import {
@@ -16,7 +16,6 @@ import {
     clearChatHistory,
     getUserVoiceMode,
     setUserVoiceMode,
-    getUserBriefingMode,
     setUserBriefingMode,
     getLastModelChatMessage,
     addOrUpdateAuthorizedUser,
@@ -27,7 +26,7 @@ import {
 import { isConversationalOrCorrection, isCompoundOrMultiAction, isRealTimeSearchQuery, parseNaturalIncome, parseNaturalExpense } from "../utils/natural.js";
 
 // Hub
-import { sendMainHub, sendHelpMessage, sendSettingsMenu, sendUserManagementMenu, sendGuestPermissionsMenu } from "../modules/hub/views.js";
+import { sendMainHub, sendHelpMessage, sendSettingsMenu, sendUserManagementMenu } from "../modules/hub/views.js";
 
 // Finance
 import {
@@ -71,7 +70,7 @@ import {
 } from "../modules/reminders/commands.js";
 
 // Voice & Copilot
-import { sendVoiceHelp, handleVoiceMessage } from "../modules/voice/handler.js";
+import { handleVoiceMessage } from "../modules/voice/handler.js";
 import { handleAiCopilotQuery, sendFridayTacticalBriefing } from "../modules/copilot/handler.js";
 
 export async function handleUndoLastTransaction(env, chatId, userId, filter = null, message = null) {

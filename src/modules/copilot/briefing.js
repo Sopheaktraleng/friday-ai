@@ -1,6 +1,5 @@
 import { today, currentTime, dateDaysAgo } from "../../utils/time.js";
 import { TIME_ZONE, GEMINI_MODELS, getAllowedUserIds, isUserAuthorized, isOwner } from "../../config/constants.js";
-import { formatMoney } from "../../utils/format.js";
 import { buildAiUserContext, parseCopilotResponse, generateSpeechAudio, extractGeminiCandidateText } from "../../services/ai.js";
 import { sendMessage, sendTelegramVoice } from "../../services/telegram.js";
 import { ensureTables } from "../../db/schema.js";

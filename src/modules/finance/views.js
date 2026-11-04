@@ -1,7 +1,7 @@
-import { EXCHANGE_RATE, QUICK_EXPENSE_CATS, QUICK_INCOME_CATS, isUserAuthorized } from "../../config/constants.js";
+import { EXCHANGE_RATE, isUserAuthorized } from "../../config/constants.js";
 import { today, monthLabel, dateDaysAgo, formatCambodiaDateTime, formatTimeFromCreatedAt } from "../../utils/time.js";
 import { formatAmount, formatMoney, capitalize, getCategoryIcon, generateTextProgressBar, cleanMd } from "../../utils/format.js";
-import { getDisplayCurrency, getFinancialSummary, getPeriodStats, getCategoryRows, getBudgetWarningText, getBudgetStatus, claimDailyBroadcast, getRecentFavorites } from "../../db/queries.js";
+import { getDisplayCurrency, getFinancialSummary, getPeriodStats, getCategoryRows, getBudgetStatus, claimDailyBroadcast, getRecentFavorites } from "../../db/queries.js";
 import { ensureTables } from "../../db/schema.js";
 import { telegram, sendMessage, safeEditOrSendMessage } from "../../services/telegram.js";
 

@@ -8,8 +8,7 @@ import {
     clearToday,
     clearAllExpenses,
     saveChatMessage, 
-    saveUserMemory, 
-    getUserVoiceMode 
+    saveUserMemory 
 } from "../../db/queries.js";
 import { EXCHANGE_RATE, isOwner } from "../../config/constants.js";
 import { ensureTables } from "../../db/schema.js";

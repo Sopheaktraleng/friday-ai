@@ -1,6 +1,6 @@
 import { EXCHANGE_RATE } from "../config/constants.js";
 import { today, monthPrefix } from "../utils/time.js";
-import { formatAmount, formatMoney, normalizeCategory } from "../utils/format.js";
+import { formatAmount, normalizeCategory } from "../utils/format.js";
 
 export async function wasUpdateProcessed(db, updateId) {
     if (typeof updateId !== "number") {
@@ -685,19 +685,6 @@ export async function setAuthorizedUserStatus(db, userId, status) {
         return true;
     } catch (e) {
         console.error("setAuthorizedUserStatus error:", e);
-        return false;
-    }
-}
-
-export async function isUserAllowedInDb(db, userId) {
-    if (!db || !userId) return false;
-    try {
-        const row = await db
-            .prepare("SELECT status FROM authorized_users WHERE user_id = ?")
-            .bind(String(userId))
-            .first();
-        return row?.status === "active";
-    } catch (e) {
         return false;
     }
 }

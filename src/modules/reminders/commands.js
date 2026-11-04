@@ -1,60 +1,7 @@
 import { TIME_ZONE } from "../../config/constants.js";
 import { ensureTables } from "../../db/schema.js";
 import { sendMessage } from "../../services/telegram.js";
-import { sendPromptAddReminder, sendRemindersMenu } from "./views.js";
-
-export async function handleLunchboxCommand(env, chatId, userId, text) {
-    const parts = text.split(/\s+/);
-    if (parts.length === 1) {
-        await sendRemindersMenu(env, chatId, userId);
-        return;
-    }
-
-    const arg = parts[1].toLowerCase();
-    if (arg === "on") {
-        await ensureTables(env.DB);
-        const existing = await env.DB.prepare("SELECT id FROM reminders WHERE user_id = ? AND type = 'lunchbox' LIMIT 1").bind(userId).first();
-        if (existing) {
-            await env.DB.prepare("UPDATE reminders SET is_active = 1, chat_id = ? WHERE id = ?").bind(String(chatId), existing.id).run();
-        } else {
-            await env.DB.prepare(`
-                INSERT INTO reminders (user_id, chat_id, title, reminder_time, frequency, type, is_active)
-                VALUES (?, ?, 'Departure / Lunchbox Reminder', '17:30', 'weekdays', 'lunchbox', 1)
-            `).bind(userId, String(chatId)).run();
-        }
-        await sendMessage(env, chatId, "🟢 *Departure alarm enabled for 17:30 (Mon–Fri)!*", { parse_mode: "Markdown" });
-        await sendRemindersMenu(env, chatId, userId);
-        return;
-    }
-
-    if (arg === "off") {
-        await ensureTables(env.DB);
-        await env.DB.prepare("UPDATE reminders SET is_active = 0 WHERE user_id = ? AND type = 'lunchbox'").bind(userId).run();
-        await sendMessage(env, chatId, "🔴 *Departure alarm disabled.*", { parse_mode: "Markdown" });
-        await sendRemindersMenu(env, chatId, userId);
-        return;
-    }
-
-    const timeMatch = arg.match(/^([0-1]?[0-9]|2[0-3]):([0-5][0-9])$/);
-    if (timeMatch) {
-        const formattedTime = `${timeMatch[1].padStart(2, "0")}:${timeMatch[2]}`;
-        await ensureTables(env.DB);
-        const existing = await env.DB.prepare("SELECT id FROM reminders WHERE user_id = ? AND type = 'lunchbox' LIMIT 1").bind(userId).first();
-        if (existing) {
-            await env.DB.prepare("UPDATE reminders SET reminder_time = ?, is_active = 1, chat_id = ? WHERE id = ?").bind(formattedTime, String(chatId), existing.id).run();
-        } else {
-            await env.DB.prepare(`
-                INSERT INTO reminders (user_id, chat_id, title, reminder_time, frequency, type, is_active)
-                VALUES (?, ?, 'Departure / Lunchbox Reminder', ?, 'weekdays', 'lunchbox', 1)
-            `).bind(userId, String(chatId), formattedTime).run();
-        }
-        await sendMessage(env, chatId, `⏰ *Departure reminder time set to ${formattedTime} (Active)!*`, { parse_mode: "Markdown" });
-        await sendRemindersMenu(env, chatId, userId);
-        return;
-    }
-
-    await sendRemindersMenu(env, chatId, userId);
-}
+import { sendPromptAddReminder } from "./views.js";
 
 export function parseReminderInput(raw, now = new Date()) {
     let clean = raw.replace(/^\/?(remindme|remind|alarm)\s*/i, "").trim();

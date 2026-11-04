@@ -67,24 +67,6 @@ export function formatTimeFromCreatedAt(created_at) {
     }).format(utcDate);
 }
 
-export function lastMonthPrefix() {
-    const now = new Date();
-    const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    return `${y}-${m}`;
-}
-
-export function lastMonthLabel() {
-    const now = new Date();
-    const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    return new Intl.DateTimeFormat("en-US", {
-        timeZone: TIME_ZONE,
-        year: "numeric",
-        month: "long",
-    }).format(d);
-}
-
 export function dateDaysAgo(days) {
     const d = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     return new Intl.DateTimeFormat("en-CA", {

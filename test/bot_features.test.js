@@ -1,10 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
-import { GEMINI_MODELS, isUserAuthorized, isUserAuthorizedAsync, isOwner, OWNER_USER_ID, getAllowedUserIds, DEFAULT_ALLOWED_USERS, hasUserPermission, formatUserPermissionsSummary } from "../src/config/constants.js";
-import { addOrUpdateAuthorizedUser, listAuthorizedUsers, setAuthorizedUserStatus, getBudgetStatus, searchLedger, addExpenseRecord, updateUserPermissions, toggleUserPermission, getAuthorizedUser } from "../src/db/queries.js";
+import { GEMINI_MODELS, isUserAuthorized, isUserAuthorizedAsync, isOwner, getAllowedUserIds, DEFAULT_ALLOWED_USERS, hasUserPermission, formatUserPermissionsSummary } from "../src/config/constants.js";
+import { getBudgetStatus, searchLedger } from "../src/db/queries.js";
 import { normalizeReminderTime } from "../src/utils/time.js";
 import { isCompoundOrMultiAction, isRealTimeSearchQuery, isConversationalOrCorrection } from "../src/utils/natural.js";
 import { buildSmartLocalFallback, handleAiCopilotQuery } from "../src/modules/copilot/handler.js";
-import { parseCopilotResponse, buildCopilotPrompt, extractGroundingSources, getLiveRealtimeFallback, askGeminiWithGoogleSearch } from "../src/services/ai.js";
+import { buildCopilotPrompt, extractGroundingSources, askGeminiWithGoogleSearch } from "../src/services/ai.js";
 import { ensureTables, resetTablesEnsuredForTest } from "../src/db/schema.js";
 import { handleMessage, handleRealTimeSearchCommand } from "../src/handlers/message.js";
 import worker from "../src/worker.js";
@@ -12,7 +12,7 @@ import { handleCallback } from "../src/handlers/callback.js";
 import { answerCallback, syncBotCommands, syncUserBotCommands, getUserCommandList } from "../src/services/telegram.js";
 import { sendRemindersMenu, sendPromptAddReminder, sendReminderTimeMenu, sendFocusMenu } from "../src/modules/reminders/views.js";
 import { parseReminderInput } from "../src/modules/reminders/commands.js";
-import { sendMainHub, sendSettingsMenu, sendHelpMessage, sendGuestPermissionsMenu } from "../src/modules/hub/views.js";
+import { sendMainHub, sendSettingsMenu, sendHelpMessage } from "../src/modules/hub/views.js";
 import { sendFinanceHub, sendCategoryPicker, sendTransactions } from "../src/modules/finance/views.js";
 import { handleAddWorkLogCommand, handleListTodayTasksCommand, handleListTasksHistoryCommand, handleTasksMonthStatsCommand } from "../src/modules/work/commands.js";
 

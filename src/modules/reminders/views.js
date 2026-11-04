@@ -1,4 +1,3 @@
-import { TIME_ZONE } from "../../config/constants.js";
 import { ensureTables } from "../../db/schema.js";
 import { safeEditOrSendMessage } from "../../services/telegram.js";
 import { cleanMd } from "../../utils/format.js";
