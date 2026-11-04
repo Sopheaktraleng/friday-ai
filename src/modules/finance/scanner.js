@@ -300,6 +300,24 @@ export async function handleScanDiscard(env, chatId, userId, scanId, messageId, 
     }
 }
 
+/**
+ * Selects the optimal photo resolution from Telegram's photo array for OCR analysis.
+ * Avoids multi-megabyte raw uploads while ensuring sharp, high-contrast text (~900px to 1600px).
+ */
+export function selectOptimalOcrPhoto(photoArray) {
+    if (!Array.isArray(photoArray) || photoArray.length === 0) return null;
+    if (photoArray.length === 1) return photoArray[0];
+
+    const ideal = photoArray.find(p => {
+        const maxDim = Math.max(p.width || 0, p.height || 0);
+        return maxDim >= 900 && maxDim <= 1600;
+    });
+    if (ideal) return ideal;
+
+    const targetIdx = photoArray.length >= 4 ? photoArray.length - 2 : photoArray.length - 1;
+    return photoArray[targetIdx];
+}
+
 export async function handleImageReceipt(message, env, origin) {
     const chatId = message.chat.id;
     const userId = String(message.from?.id || chatId);
@@ -310,7 +328,8 @@ export async function handleImageReceipt(message, env, origin) {
     let fileId = null;
     let mimeType = "image/jpeg";
     if (message.photo && Array.isArray(message.photo) && message.photo.length > 0) {
-        fileId = message.photo[message.photo.length - 1].file_id;
+        const optimal = selectOptimalOcrPhoto(message.photo);
+        fileId = optimal?.file_id || message.photo[message.photo.length - 1].file_id;
     } else if (message.document && message.document.mime_type && message.document.mime_type.startsWith("image/")) {
         fileId = message.document.file_id;
         mimeType = message.document.mime_type;

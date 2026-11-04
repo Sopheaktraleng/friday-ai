@@ -250,6 +250,9 @@ export async function sendTransactionReceipt(env, chatId, userId, type, amount, 
             const overAmt = formatAmount(budgetStatus.spentKhr - budgetStatus.budgetKhr, displayCurrency);
             lines.push(`🚨 *Over Budget:* \`${budgetStatus.bar}\` *${budgetStatus.percent}%*`);
             lines.push(`   └ Over by *${overAmt}* (Limit: ${budgetStatus.budgetStr})`);
+        } else if (budgetStatus.percent >= 80) {
+            lines.push(`⚠️ *Budget Warning (80%+):* \`${budgetStatus.bar}\` *${budgetStatus.percent}%*`);
+            lines.push(`   └ [${budgetStatus.spentStr} / ${budgetStatus.budgetStr}] • \`${budgetStatus.safeDailyStr}/day\` safe for ${budgetStatus.daysRemaining}d`);
         } else {
             lines.push(`📊 *Monthly Budget:* \`${budgetStatus.bar}\` *${budgetStatus.percent}%*`);
             lines.push(`   └ [${budgetStatus.spentStr} / ${budgetStatus.budgetStr}] • \`${budgetStatus.safeDailyStr}/day\` safe`);

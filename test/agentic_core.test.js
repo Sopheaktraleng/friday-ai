@@ -16,10 +16,14 @@ import {
     searchHistoricalRecords,
     savePendingStatement,
     getPendingStatement,
-    importPendingStatementTransactions
+    importPendingStatementTransactions,
+    cleanupExpiredDatabaseRecords,
+    getBudgetWarningText,
+    getBudgetStatus
 } from "../src/db/queries.js";
 import {
-    handlePdfDocument
+    handlePdfDocument,
+    selectOptimalOcrPhoto
 } from "../src/modules/finance/scanner.js";
 import { handleMessage } from "../src/handlers/message.js";
 import { handleCallback } from "../src/handlers/callback.js";
@@ -971,6 +975,95 @@ describe("Core AI & Agentic Intelligence Adjustments", () => {
             expect(result).toBeDefined();
             expect(result.engine).toBe("groq_reasoning");
             expect(result.reply).toContain("runway is 28 months");
+        });
+    });
+
+    describe("10. Performance, Storage TTL & Proactive Budget Alerts", () => {
+        it("selectOptimalOcrPhoto should select the balanced 900px-1600px photo rather than raw 48MP image", () => {
+            const rawPhotoArray = [
+                { file_id: "thumb_id", width: 90, height: 90 },
+                { file_id: "small_id", width: 320, height: 320 },
+                { file_id: "optimal_id", width: 1280, height: 1280 },
+                { file_id: "raw_huge_id", width: 4000, height: 3000 }
+            ];
+
+            const chosen = selectOptimalOcrPhoto(rawPhotoArray);
+            expect(chosen).toBeDefined();
+            expect(chosen.file_id).toBe("optimal_id");
+            expect(chosen.width).toBe(1280);
+        });
+
+        it("selectOptimalOcrPhoto should gracefully handle single-element and small photo arrays", () => {
+            const single = [{ file_id: "single_id", width: 640, height: 480 }];
+            expect(selectOptimalOcrPhoto(single).file_id).toBe("single_id");
+            expect(selectOptimalOcrPhoto([])).toBeNull();
+            expect(selectOptimalOcrPhoto(null)).toBeNull();
+        });
+
+        it("cleanupExpiredDatabaseRecords should execute batch TTL purge across ephemeral tables", async () => {
+            const mockDb = {
+                batch: vi.fn().mockResolvedValue([
+                    { meta: { changes: 5 } },
+                    { meta: { changes: 2 } },
+                    { meta: { changes: 0 } },
+                    { meta: { changes: 12 } },
+                    { meta: { changes: 3 } },
+                    { meta: { changes: 1 } }
+                ]),
+                prepare: vi.fn().mockReturnValue({
+                    run: vi.fn().mockResolvedValue({ meta: { changes: 0 } })
+                })
+            };
+
+            const result = await cleanupExpiredDatabaseRecords(mockDb);
+            expect(result.ok).toBe(true);
+            expect(result.totalPurged).toBe(23);
+            expect(mockDb.batch).toHaveBeenCalledTimes(1);
+        });
+
+        it("getBudgetWarningText should proactively return warning at 80% and over-budget alert at 100%", async () => {
+            // Mock DB where user budget is $300 (1,200,000 KHR) and spent is 85% ($255 = 1,020,000 KHR)
+            const mockDbWarning = {
+                prepare: vi.fn().mockImplementation((query) => ({
+                    bind: vi.fn().mockReturnValue({
+                        first: vi.fn().mockResolvedValue(
+                            query.includes("monthly_budget") ? { monthly_budget: 1200000 } :
+                            query.includes("display_currency") ? { display_currency: "USD" } :
+                            { total: 1020000 }
+                        ),
+                        all: vi.fn().mockResolvedValue({
+                            results: [
+                                { type: "expense", currency: "USD", total: 255 }
+                            ]
+                        })
+                    })
+                }))
+            };
+
+            const warning = await getBudgetWarningText(mockDbWarning, "test_user");
+            expect(warning).toContain("BUDGET WARNING");
+            expect(warning).toContain("85%");
+
+            // Mock DB where user is over 100%
+            const mockDbOver = {
+                prepare: vi.fn().mockImplementation((query) => ({
+                    bind: vi.fn().mockReturnValue({
+                        first: vi.fn().mockResolvedValue(
+                            query.includes("monthly_budget") ? { monthly_budget: 1200000 } :
+                            query.includes("display_currency") ? { display_currency: "USD" } :
+                            { total: 1400000 }
+                        ),
+                        all: vi.fn().mockResolvedValue({
+                            results: [
+                                { type: "expense", currency: "USD", total: 350 }
+                            ]
+                        })
+                    })
+                }))
+            };
+
+            const alert = await getBudgetWarningText(mockDbOver, "test_user");
+            expect(alert).toContain("OVER BUDGET ALERT");
         });
     });
 });

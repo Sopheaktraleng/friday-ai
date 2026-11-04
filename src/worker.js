@@ -1,7 +1,7 @@
 import dashboardHtml from "./dashboard_html.js";
 import { json } from "./utils/format.js";
 import { timingSafeEqual } from "./utils/crypto.js";
-import { wasUpdateProcessed } from "./db/queries.js";
+import { wasUpdateProcessed, cleanupExpiredDatabaseRecords } from "./db/queries.js";
 import { handleApiRequest } from "./handlers/api.js";
 import { handleMessage } from "./handlers/message.js";
 import { handleCallback } from "./handlers/callback.js";
@@ -171,7 +171,7 @@ export default {
             const isDedicatedBriefing = event.cron === "0 1 * * *";
             const isGeneralMinuteCron = event.cron === "* * * * *" || !event.cron;
 
-            // Daily at 01:00 UTC (8:00 AM ICT) - Clean Good Morning Greeting
+            // Daily at 01:00 UTC (8:00 AM ICT) - Morning Greeting, Weekly Report & Database Hygiene
             const isBriefingSlot = isDedicatedBriefing || (isGeneralMinuteCron && utcHours === 1 && utcMinutes === 0);
             if (isBriefingSlot) {
                 await sendDailyScheduledBriefings(env);
@@ -179,6 +179,11 @@ export default {
                 // Monday Weekly Spending Report
                 if (now.getUTCDay() === 1) {
                     await sendWeeklyScheduledReports(env);
+                }
+
+                // Daily automated database hygiene & TTL pruning
+                if (env.DB) {
+                    await cleanupExpiredDatabaseRecords(env.DB).catch(() => {});
                 }
             }
         } catch (error) {

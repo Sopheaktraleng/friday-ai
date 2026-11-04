@@ -415,7 +415,7 @@ export async function getBudgetStatus(db, userId) {
             safeDailyStr,
             displayCurrency,
             isOver: percent > 100,
-            isWarning: percent >= 85 && percent <= 100
+            isWarning: percent >= 80 && percent <= 100
         };
     } catch (e) {
         console.error("getBudgetStatus error:", e);
@@ -430,12 +430,45 @@ export async function getBudgetWarningText(db, userId) {
     if (status.percent >= 100) {
         const overageInKhr = status.spentKhr - status.budgetKhr;
         const formattedOverage = formatAmount(overageInKhr, status.displayCurrency);
-        return `\n🚨 *OVER BUDGET ALERT!*\n└ Exceeded monthly budget by *${formattedOverage}* (\`${status.bar}\` ${status.percent}% spent).`;
-    } else if (status.percent >= 85) {
+        return `\n\n🚨 *OVER BUDGET ALERT!*\n└ Exceeded monthly budget by *${formattedOverage}* (\`${status.bar}\` ${status.percent}% spent).`;
+    } else if (status.percent >= 80) {
         const formattedRemaining = formatAmount(status.remainingKhr, status.displayCurrency);
-        return `\n⚠️ *BUDGET WARNING!*\n└ Spent *${status.percent}%* (\`${status.bar}\`). Only *${formattedRemaining}* remaining (\`${status.safeDailyStr}/day\` safe).`;
+        return `\n\n⚠️ *BUDGET WARNING (${status.percent}%)*\n└ Spent *${status.percent}%* (\`${status.bar}\`). Only *${formattedRemaining}* remaining (\`${status.safeDailyStr}/day\` safe for ${status.daysRemaining} days).`;
     }
     return "";
+}
+
+/**
+ * Automatically purges expired ephemeral logs and temporary scans to keep Cloudflare D1 storage clean and fast.
+ */
+export async function cleanupExpiredDatabaseRecords(db) {
+    if (!db) return { ok: false, totalPurged: 0 };
+    try {
+        const statements = [
+            db.prepare("DELETE FROM processed_updates WHERE processed_at < datetime('now', '-7 days')"),
+            db.prepare("DELETE FROM pending_scans WHERE created_at < datetime('now', '-2 days')"),
+            db.prepare("DELETE FROM pending_statements WHERE created_at < datetime('now', '-3 days')"),
+            db.prepare("DELETE FROM chat_history WHERE created_at < datetime('now', '-30 days')"),
+            db.prepare("DELETE FROM daily_broadcast_logs WHERE date < date('now', '-14 days')"),
+            db.prepare("DELETE FROM reminders WHERE is_active = 0 AND created_at < datetime('now', '-30 days')")
+        ];
+
+        if (typeof db.batch === "function") {
+            const results = await db.batch(statements);
+            const totalPurged = results.reduce((acc, r) => acc + (r?.meta?.changes ?? r?.changes ?? 0), 0);
+            return { ok: true, totalPurged };
+        }
+
+        let totalPurged = 0;
+        for (const stmt of statements) {
+            const res = await stmt.run();
+            totalPurged += (res?.meta?.changes ?? res?.changes ?? 0);
+        }
+        return { ok: true, totalPurged };
+    } catch (err) {
+        console.warn("cleanupExpiredDatabaseRecords warning:", err.message);
+        return { ok: false, error: err.message, totalPurged: 0 };
+    }
 }
 
 // Multi-turn conversation & long-term memory queries

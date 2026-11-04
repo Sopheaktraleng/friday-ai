@@ -8,7 +8,8 @@ import {
     clearToday,
     clearAllExpenses,
     saveChatMessage, 
-    saveUserMemory 
+    saveUserMemory,
+    getBudgetWarningText
 } from "../../db/queries.js";
 import { EXCHANGE_RATE, isOwner } from "../../config/constants.js";
 import { ensureTables } from "../../db/schema.js";
@@ -417,6 +418,7 @@ export async function handleAiCopilotQuery(env, chatId, userId, query, from, mes
             ? result.actions
             : (result.action && typeof result.action === "object" ? [result.action] : []);
 
+        let hasLoggedExpense = false;
         for (const act of actionsToExecute) {
             try {
                 if (!act || typeof act !== "object" || act.alreadyExecuted) continue;
@@ -426,6 +428,7 @@ export async function handleAiCopilotQuery(env, chatId, userId, query, from, mes
                     const curr = (act.currency || context.displayCurrency || "USD").toUpperCase();
                     const recordDate = (act.date && /^\d{4}-\d{2}-\d{2}$/.test(act.date)) ? act.date : today();
                     await addExpenseRecord(env.DB, userId, act.amount, cat, "expense", curr, recordDate, act.merchant || null, act.note || null);
+                    hasLoggedExpense = true;
                 } else if (act.type === "add_income" && act.amount && act.amount > 0) {
                     const cat = act.category || "Income";
                     const curr = (act.currency || context.displayCurrency || "USD").toUpperCase();
@@ -467,6 +470,15 @@ export async function handleAiCopilotQuery(env, chatId, userId, query, from, mes
             } catch (actErr) {
                 console.error("Failed to execute AI Copilot action:", actErr);
             }
+        }
+
+        if (hasLoggedExpense && env.DB) {
+            try {
+                const warningText = await getBudgetWarningText(env.DB, userId);
+                if (warningText && result?.reply) {
+                    result.reply += warningText;
+                }
+            } catch (_) {}
         }
 
         if (isThinking && result?.reply && !result.reply.startsWith("🧠")) {
