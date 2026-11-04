@@ -438,9 +438,7 @@ export async function getBudgetWarningText(db, userId) {
     return "";
 }
 
-// ============================================================================
-// Multi-turn Conversation & Personal Long-Term Memory
-// ============================================================================
+// Multi-turn conversation & long-term memory queries
 
 export async function getRecentChatHistory(db, userId, limit = 18) {
     try {
@@ -563,7 +561,6 @@ export async function claimDailyBroadcast(db, userId, type, date) {
         const t = String(type);
         const d = String(date);
 
-        // 1. Quick check if already dispatched today
         const existing = await db
             .prepare("SELECT 1 FROM daily_broadcast_logs WHERE user_id = ? AND type = ? AND date = ?")
             .bind(uId, t, d)
@@ -573,7 +570,7 @@ export async function claimDailyBroadcast(db, userId, type, date) {
             return false;
         }
 
-        // 2. Atomic insert to block concurrent worker race conditions
+        // Atomic insertion to guard against concurrent edge race conditions
         const result = await db
             .prepare("INSERT OR IGNORE INTO daily_broadcast_logs (user_id, type, date) VALUES (?, ?, ?)")
             .bind(uId, t, d)

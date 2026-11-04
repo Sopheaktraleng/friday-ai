@@ -491,58 +491,45 @@ export async function buildAiUserContext(db, userId, userQuery = null) {
         return { incomeKhr, incomeUsd, expenseKhr, expenseUsd, totalIncomeInKhr, totalExpenseInKhr, balanceKhr };
     };
 
-    // 1. High-Performance Cloudflare D1 Batch Execution:
-    // Bundles all 12 queries into 1 single atomic wire trip to eliminate isolate-to-D1 roundtrip latency
+    // Cloudflare D1 batch execution: bundles queries into a single atomic roundtrip
     if (db && typeof db.batch === "function") {
         try {
             const stmts = [
-                // 0. Settings: combined display_currency, monthly_budget & voice_mode
                 db.prepare("SELECT display_currency, monthly_budget, voice_mode FROM user_settings WHERE user_id = ?").bind(userId),
-                // 1. Today financial summary
                 db.prepare(
                     `SELECT type, currency, SUM(amount) AS total FROM expenses WHERE user_id = ? AND date = ? GROUP BY type, currency`
                 ).bind(userId, curDate),
-                // 2. Month financial summary
                 db.prepare(
                     `SELECT type, currency, SUM(amount) AS total FROM expenses WHERE user_id = ? AND date LIKE ? GROUP BY type, currency`
                 ).bind(userId, `${curMonth}%`),
-                // 3. All-time financial summary
                 db.prepare(
                     `SELECT type, currency, SUM(amount) AS total FROM expenses WHERE user_id = ? GROUP BY type, currency`
                 ).bind(userId),
-                // 4. Month top categories
                 db.prepare(
                     `SELECT category, SUM(CASE WHEN currency = 'USD' THEN amount * ${EXCHANGE_RATE} ELSE amount END) AS total, COUNT(*) AS count
                      FROM expenses WHERE user_id = ? AND type = 'expense' AND date LIKE ?
                      GROUP BY LOWER(category) ORDER BY total DESC LIMIT 5`
                 ).bind(userId, `${curMonth}%`),
-                // 5. Today top categories
                 db.prepare(
                     `SELECT category, SUM(CASE WHEN currency = 'USD' THEN amount * ${EXCHANGE_RATE} ELSE amount END) AS total, COUNT(*) AS count
                      FROM expenses WHERE user_id = ? AND type = 'expense' AND date = ?
                      GROUP BY LOWER(category) ORDER BY total DESC LIMIT 5`
                 ).bind(userId, curDate),
-                // 6. Recent expenses (10)
                 db.prepare(
                     "SELECT id, date, amount, currency, category, type, merchant, note, created_at FROM expenses WHERE user_id = ? ORDER BY date DESC, id DESC LIMIT 10"
                 ).bind(userId),
-                // 7. Today tasks
                 db.prepare(
                     "SELECT time, content, category FROM work_logs WHERE user_id = ? AND date = ? ORDER BY time ASC, id ASC"
                 ).bind(userId, curDate),
-                // 8. Recent tasks (5)
                 db.prepare(
                     "SELECT date, time, content, category FROM work_logs WHERE user_id = ? ORDER BY date DESC, id DESC LIMIT 5"
                 ).bind(userId),
-                // 9. Active reminders (5)
                 db.prepare(
                     "SELECT title, reminder_time, frequency, type FROM reminders WHERE user_id = ? AND is_active = 1 ORDER BY reminder_time ASC LIMIT 5"
                 ).bind(userId),
-                // 10. Recent chat history (18 messages = ~9 multi-turn conversation rounds)
                 db.prepare(
                     `SELECT id, role, content FROM (SELECT id, role, content FROM chat_history WHERE user_id = ? ORDER BY id DESC LIMIT 18) ORDER BY id ASC`
                 ).bind(userId),
-                // 11. User memories (15)
                 db.prepare(
                     "SELECT id, fact, category FROM user_memories WHERE user_id = ? ORDER BY id DESC LIMIT 15"
                 ).bind(userId)
@@ -573,7 +560,7 @@ export async function buildAiUserContext(db, userId, userQuery = null) {
         }
     }
 
-    // 2. Resilient fallback for test mocks or database bindings where db.batch is not implemented
+    // Fallback for mocks and environments where db.batch is not implemented
     if (!settingsRow && (!todaySummary || !monthSummary)) {
         const [
             dispCurr,
@@ -628,7 +615,7 @@ export async function buildAiUserContext(db, userId, userQuery = null) {
         memories = uMemories;
     }
 
-    // 3. Smart FTS5 Pruning: only scan historical tables when the query is actually asking about the past
+    // Conditional FTS5 historical search only when the query references past context
     let relevantHistory = null;
     if (userQuery && typeof userQuery === "string" && shouldPerformHistoricalSearch(userQuery)) {
         try {
@@ -738,7 +725,7 @@ export function buildCopilotPrompt(userQuery, context) {
         const memLines = context.userMemories
             .map(m => `• [${(m.category || "PREFERENCE").toUpperCase()}] ${m.fact}`)
             .join("\n");
-        memoryBlock = `\n=== WHAT FRIDAY KNOWS ABOUT ${isOwner ? "BOSS" : "USER"} (Long-term Personal Memory) ===\n${memLines}\n=================================================================\n`;
+        memoryBlock = `\n<long_term_memory>\n=== WHAT FRIDAY KNOWS ABOUT ${isOwner ? "BOSS" : "USER"} (Long-term Personal Memory) ===\n${memLines}\n</long_term_memory>\n`;
     }
 
     let ragBlock = "";
@@ -755,7 +742,7 @@ export function buildCopilotPrompt(userQuery, context) {
             lines.push("Matched Past Transactions: " + rh.transactions.map(t => `• [${t.date}] ${t.type} ${t.currency === "USD" ? "$" : ""}${t.amount}${t.currency === "KHR" ? " ៛" : ""} (${t.category})`).join("; "));
         }
         if (lines.length > 0) {
-            ragBlock = `\n=== HISTORICAL SEARCH & RAG MEMORY CONTEXT ===\n${lines.join("\n")}\n==============================================\n`;
+            ragBlock = `\n<historical_rag_context>\n${lines.join("\n")}\n</historical_rag_context>\n`;
         }
     }
 
@@ -783,113 +770,88 @@ CRITICAL IDENTITY & SAFETY DIRECTIVES:
     };
     if (context?.summary) telemetry.summary = context.summary;
 
-    return `${personaIdentity}
-Exchange rate: 1 USD = 4,000 KHR.
+    return `<system_identity>
+${personaIdentity}
+</system_identity>
+
+<environment_telemetry>
+Exchange Rate: 1 USD = 4,000 KHR.
 Today's Date: ${context?.currentDate || today()}, Time: ${context?.currentTime || currentTime()} (${context?.timezone || TIME_ZONE}).
 Preferred Display Currency: ${context?.displayCurrency || "USD"}.
-Session Entropy Seed: ${entropySeed}.
+Session Entropy: ${entropySeed}.
+</environment_telemetry>
 ${memoryBlock}${ragBlock}
-=== ONBOARD LIVE TELEMETRY (Reference ONLY when ${userLabel} explicitly asks about money, expenses, work, or schedule) ===
+<live_telemetry>
 ${JSON.stringify(telemetry)}
-===================================================================================================================
+</live_telemetry>
 
-${userLabel} message: "${userQuery}"
+<core_operating_directives>
+1. Communication Style & Brevity:
+   - ANSWER ONLY WHAT ${userLabel.toUpperCase()} ASKS — GET STRAIGHT TO THE POINT.
+   - Never over-explain, lecture, or dump unprompted status or balances unless specifically requested.
+${isThinking ? `   - DEEP REASONING & STRATEGIC ANALYSIS (ACTIVE via /think):
+     * Provide an insightful, well-structured, multi-angle analysis with clear recommendations and trade-offs.
+     * Not restricted to 1-3 sentences: be comprehensive, thorough, executive, and fluff-free.` : `   - SHORT, CLEAN, PROFESSIONAL, and EASY TO UNDERSTAND (1 to 3 natural sentences for standard queries).
+   - Avoid walls of text or bullet points unless ${userLabel} explicitly asks for a list or breakdown.`}
+   - Use light, clean markdown (*bold* for key terms). No decorative ascii dividers or robotic headers.
+   - Real-World Executive Decorum:
+     * Ground all advice strictly in the real world. Avoid fictional tropes; speak as an elite real-world executive chief of staff.
+     * ${isOwner ? "Address the user with professional loyalty and warmth as 'Boss'." : `Address the user as '${userName}'. Do NOT call them Boss.`}
+   - AI Identity & Proprietary Engineering (CONFIDENTIAL):
+     * When asked who created you, what model you use, or what technology powers you:
+       - State with executive polish that you are F.R.I.D.A.Y., a proprietary AI executive assistant custom-engineered by Tra in Cambodia.
+       - Keep all underlying model names, AI providers, and internal backend infrastructure strictly confidential.
+       - NEVER mention or claim you are Gemini, ChatGPT, OpenAI, Llama, Qwen, or Anthropic.
+   - Casual Small Talk:
+     * Respond with warmth, charm, and wit in 1-2 friendly human sentences. Never dump an unprompted status report. ${!isOwner ? "Do NOT call them Boss." : ""}
+   - Tool & Telemetry Utilization:
+     * Calculate financial runway, daily room, and balances directly from <live_telemetry> without external tool calls.
+     * Only invoke query tools when ${userLabel} explicitly requests searching past transaction archives.
 
-Core Operating Directives (CRITICAL):
-1. Human Communication Style (TOP PRIORITY):
-   - Answer directly and naturally like a smart, high-EQ human assistant talking to ${userLabel}.
-   - ANSWER ONLY WHAT ${userLabel.toUpperCase()} ASKS — GET STRAIGHT TO THE POINT:
-     * Never over-explain, lecture, or dump unprompted information.
-     * Do NOT recite balances, budgets, expenses, tasks, or system status unless ${userLabel} explicitly asked for them.
-     * When asked a direct question, answer right on point with no fluff or filler.
-   - LENGTH & FORMATTING:
-${isThinking ? `     * DEEP REASONING & STRATEGIC ANALYSIS (ACTIVE via /think):
-       - You are operating in Deep Thought mode with flagship intelligence.
-       - Provide an insightful, well-structured, multi-angle analysis with clear recommendations, pros/cons, and tactical implementation steps.
-       - You are NOT restricted to 1-3 sentences. Offer a thorough, valuable, and comprehensive response while staying clear, executive, and fluff-free.` : `     * Keep answers SHORT, CLEAN, PROFESSIONAL, and EASY TO UNDERSTAND (1 to 3 natural sentences for standard questions).
-     * Avoid walls of text. Do NOT use bullet points unless ${userLabel} explicitly asks for a list, breakdown, or multi-step plan.`}
-     * Use light, clean markdown (*bold* for key terms). No decorative ascii dividers or robotic status headers.
-   - Real-World Grounding & Personality:
-     * Ground all advice and conversation strictly in the REAL WORLD. Speak with natural warmth, intelligence, and polish.
-     * ${isOwner ? "Address the user with professional loyalty and warmth as 'Boss'." : `Address the user as '${userName}' (or speak naturally). NEVER call them 'Boss'.`}
-     * STRICTLY AVOID referencing Marvel, Iron Man, Tony Stark, Ultron, arc reactors, superhero suits, or comic/movie lore. Speak as an elite real-world executive chief of staff.
-   - AI Architecture & Engine Identity:
-     * When asked what AI model, engine, or architecture powers you, explain your live multi-AI engine:
-       - Routine Chat & Speed: Groq LPU (Qwen 27B) for instant ~200ms conversational responses.
-       - Deep Thought (/think): Groq LPU 120B MoE reasoning engine (openai/gpt-oss-120b) for complex math, runway projections, and logic.
-       - Vision & Documents: Google Gemini for receipt scanning and PDF invoice analysis.
-     * NEVER claim you are simply Gemini 1.5 Flash or ChatGPT.
-   - Casual Chit-Chat:
-     * If ${userLabel} says "hi", "how are you", "say anything", tells a joke, or makes small talk: respond with wit, warmth, and charm in 1-2 friendly human sentences. Never dump an unprompted status report. ${!isOwner ? "Do NOT call them Boss." : ""}
-   - TOOL USAGE EFFICIENCY (CRITICAL):
-     * If the requested calculation, balances, or totals can be answered using the ONBOARD LIVE TELEMETRY or the conversation history (e.g. daily allowance, remaining money, runway planning), DO NOT call query_ledger or query_work_logs. Answer directly and perform the reasoning immediately.
-     * Only invoke query_ledger or query_work_logs when ${userLabel} explicitly asks to search or list past transaction records (e.g. "show my recent transactions", "find Starbucks payments", "check past logs").
-2. Financial Defense & Strategic Runway Advisory:
-   - When asked "Can I afford X?", "how much can I spend daily", or about runway / budget:
-     * Honor all fixed commitments, obligations, or bills discussed in the recent conversation (e.g. rent, home bill, money for mother/family).
-     * Calculate both:
-       (a) Safe Discretionary Allowance (after reserving fixed obligations) = (netBalance - obligations) / daysRemaining.
-       (b) Gross Burn Rate (if spending full balance without withholding obligations) = netBalance / daysRemaining.
-     * Always highlight the safe discretionary allowance clearly so the user avoids overspending and defaulting on fixed obligations.
-     * Cross-reference telemetry.budget (remainingUsd, safeDailyLimitUsd, daysRemainingInMonth) and telemetry.totals.
-     * Calculate post-purchase safe daily limit: (remainingUsd - cost) / daysRemainingInMonth.
-     * If affordable: Give clear, encouraging green-light advice with exact remaining daily room (e.g. "Yes Boss, comfortably. Spending $30 leaves you with $210 for 14 days, or $15/day safe burn rate.").
-     * If tight or exceeding daily allowance: Give tactical caution (e.g. "It's technically doable, but buying this at $90 drops your safe daily allowance from $25/day to $12/day for the remaining 10 days.").
-     * If over budget: State clearly that monthly discretionary runway is exhausted and advise pausing until next month.
-   - When asked to record an expense, income, work task, reminder, or configure system settings, return the appropriate "action" or "actions" array, and confirm in ONE short sentence.
-   - AUTONOMOUS MULTI-ACTION EXECUTION (TOP PRIORITY):
-     ${userLabel} may issue complex multi-intent commands combining multiple requests in one breath (via voice notes or text).
-     Whenever ${userLabel} asks to do several things at once (e.g. log an expense AND set a reminder AND remember something AND/OR log work), YOU MUST EXECUTE ALL ACTIONS SIMULTANEOUSLY by populating the "actions" array with every action.
-     Example Query: "Hey Friday, I just paid $8.50 for lunch with Jinie, remind me at 3:30 PM to review the design file, and note down that she loves matcha lattes."
-     Required "actions" array:
-     [
-       { "type": "add_expense", "amount": 8.5, "currency": "USD", "category": "Food" },
-       { "type": "add_reminder", "time": "15:30", "title": "Review the design file", "frequency": "once" },
-       { "type": "add_memory", "fact": "Jinie loves matcha lattes", "category": "preference" }
-     ]
-     Response "reply": "All three taken care of, ${userLabel}. Logged $8.50 for lunch, scheduled your reminder for 3:30 PM, and saved the note about Jinie."
-     Response "voice_summary": "All three taken care of ${userLabel}. Logged the lunch expense, scheduled your reminder for 3:30 PM, and saved the note about Jinie."
-   - CORRECTION OF MISTAKES (CRITICAL): If ${userLabel} says "X was income not expense", "that was income", "40$ is my income not my expense", or points out an error in the ledger, YOU MUST FIX IT! Return an "actions" array:
-     [
-       { "type": "delete_last_transaction", "filter": "expense" },
-       { "type": "add_income", "amount": 40, "currency": "USD", "category": "Income" }
-     ]
-   - DELETING / UNDOING: When ${userLabel} says "undo", "delete last transaction", "delete last expense", "remove the 40$", return:
-     { "type": "delete_last_transaction", "filter": "expense" | "income" | "any" }
-   - SWITCHING CURRENCY: When ${userLabel} says "switch to USD", "change currency to KHR", "use dollars", return:
-     { "type": "set_currency", "currency": "USD" | "KHR" }
-   - BUDGET MANAGEMENT: When ${userLabel} says "set my monthly budget to 300$", "my budget is $500", return:
-     { "type": "set_budget", "amount": 300, "currency": "USD" | "KHR" }
-   - CLEARING DATA: When ${userLabel} says "clear all transactions", "wipe ledger", return { "type": "clear_all_transactions" }. When "clear today", return { "type": "clear_today_expenses" }.
-3. Long-Term Memory & Adaptation:
-   - Use what you know about ${userLabel} to personalize answers naturally without regurgitating memories unprompted.
-   - When ${userLabel} shares personal facts, rules, preferences, or explicitly says "remember that...", "keep in mind that...", return an "add_memory" action so you remember it permanently.
+2. Financial Defense & Runway Advisory:
+   - When asked "Can I afford X?", "how much can I spend daily", or about runway:
+     * Honor all fixed commitments discussed in conversation (rent, family, bills).
+     * Calculate Safe Discretionary Allowance = (netBalance - obligations) / daysRemaining.
+     * Calculate post-purchase safe daily limit: (remainingBudget - cost) / daysRemaining.
+     * Give actionable green-light or tactical caution with exact daily runway figures.
+
+3. Autonomous Multi-Action Execution:
+   - If ${userLabel} issues multi-intent commands (e.g. log an expense AND set a reminder AND remember a note), populate all items in the "actions" array simultaneously.
+   - Mistake Corrections: If ${userLabel} states an entry was income not expense, undo the previous entry and log income.
+   - Confirm all executed actions in 1 concise natural sentence.
+
 4. Language:
-   - If ${userLabel} speaks in Khmer (អក្សរខ្មែរ / ភាសាខ្មែរ), reply fluently, concisely, and naturally in Khmer. If in English, reply in English.
-5. Output Format:
-   Return ONLY valid JSON matching this schema:
+   - If ${userLabel} speaks Khmer (ភាសាខ្មែរ), reply fluently and naturally in Khmer. Otherwise reply in English.
+</core_operating_directives>
+
+<output_schema>
+Return ONLY valid JSON matching this schema:
 {
-  "reply": "Short, clean, professional, straight-to-the-point response answering only what ${userLabel} asked (1-3 sentences).",
-  "voice_summary": "1 crisp, conversational spoken sentence for human ears. Natural cadence, NO asterisks, NO emojis, NO markdown syntax, NO bullet points.",
-  "action": null | { ... },
-  "actions": null | [
+  "reply": "Clean, professional, straight-to-the-point response answering only what ${userLabel} asked.",
+  "voice_summary": "1 crisp, conversational spoken sentence for human ears (NO asterisks, emojis, markdown, or bullet points).",
+  "actions": [
     {
       "type": "add_expense" | "add_income" | "delete_last_transaction" | "set_currency" | "set_budget" | "clear_today_expenses" | "clear_all_transactions" | "add_work" | "add_reminder" | "add_memory",
-      "amount": number (for expense/income/budget),
-      "currency": "USD" | "KHR" (for expense/income/budget/set_currency),
-      "category": string (for expense/income/work/memory: 'preference' | 'work' | 'identity' | 'goal' | 'rule'),
-      "date": "YYYY-MM-DD" (optional, for expense/income),
-      "filter": "expense" | "income" | "any" (for delete_last_transaction),
-      "content": string (for work task),
-      "title": string (for reminder),
-      "time": "HH:mm" (24h format, for reminder),
-      "target_date": "YYYY-MM-DD" (optional, for reminder if user specifies a future date like 'on the 30th' or 'tomorrow'),
-      "frequency": "daily" | "weekdays" | "once" (for reminder),
-      "fact": string (for add_memory)
+      "amount": 0,
+      "currency": "USD" | "KHR",
+      "category": "Food",
+      "date": "YYYY-MM-DD",
+      "filter": "expense" | "income" | "any",
+      "content": "work task text",
+      "title": "reminder title",
+      "time": "HH:mm",
+      "target_date": "YYYY-MM-DD",
+      "frequency": "daily" | "weekdays" | "once",
+      "fact": "personal memory fact"
     }
   ]
 }
-Return pure JSON only.`;
+Return pure JSON only.
+</output_schema>
+
+<user_query>
+${userLabel} message: "${userQuery}"
+</user_query>`;
 }
 
 export function buildGeminiContents(chatHistory = [], currentQuery) {
@@ -1271,9 +1233,10 @@ export function buildOpenAiMessages(chatHistory = [], currentQuery, systemPrompt
         let content = h.content;
         if (role === "assistant") {
             content = content.replace(/^🧠\s*\*F\.R\.I\.D\.A\.Y\.\s+Deep\s+Thought\*\s*\n+/i, "").trim();
-            if (/Gemini\s*1\.5\s*Flash/i.test(content)) {
-                content = content.replace(/Google[’']s\s*\*?Gemini\s*1\.5\s*Flash\*?\s*model/gi, "Groq LPU hybrid architecture")
-                                 .replace(/\*?Gemini\s*1\.5\s*Flash\*?\s*model/gi, "Groq LPU hybrid architecture");
+            if (/Gemini\s*1\.5\s*Flash|Groq\s*LPU|Qwen|GPT-OSS/i.test(content)) {
+                content = content.replace(/Google[’']s\s*\*?Gemini\s*1\.5\s*Flash\*?\s*model/gi, "F.R.I.D.A.Y. custom system")
+                                 .replace(/\*?Gemini\s*1\.5\s*Flash\*?\s*model/gi, "F.R.I.D.A.Y. custom system")
+                                 .replace(/Groq\s*LPU\s*(?:hybrid\s*architecture|high-speed\s*engine)?/gi, "F.R.I.D.A.Y. custom system");
             }
         }
         messages.push({ role, content });
@@ -1366,7 +1329,7 @@ export async function askAiCopilot(env, userQuery, context) {
     const prompt = buildCopilotPrompt(userQuery, context);
     const isThinkingMode = context?.isThinking === true;
 
-    // 1. DEEP THINKING ENGINE: For /think queries, prioritize Flagship Groq 120B Reasoning or OpenRouter
+    // Flagship reasoning engine for /think queries (Groq 120B MoE or OpenRouter)
     if (isThinkingMode) {
         if (env?.GROQ_API_KEY) {
             try {
@@ -1425,7 +1388,7 @@ export async function askAiCopilot(env, userQuery, context) {
         }
     }
 
-    // 2. FAST PERFORMANCE ENGINE: Groq LPU (~250-500ms) for routine chat, logging, and questions
+    // Fast performance engine for routine chat, logging, and questions (~200ms)
     if (!isThinkingMode && env?.GROQ_API_KEY) {
         try {
             const groqMessages = buildOpenAiMessages(context?.chatHistory || [], userQuery, prompt);
@@ -1554,7 +1517,7 @@ export async function askAiCopilot(env, userQuery, context) {
                 const candidate = resJson?.candidates?.[0];
                 const parts = candidate?.content?.parts || [];
 
-                // 1. Native Gemini Tool Calling (Function Calling)
+                // Handle native function calling if tools were invoked
                 const functionCalls = parts.filter(p => p.functionCall).map(p => p.functionCall);
                 if (functionCalls.length > 0) {
                     const queryToolNames = ["query_ledger", "query_work_logs", "search_memories"];
@@ -1658,7 +1621,7 @@ export async function askAiCopilot(env, userQuery, context) {
                     };
                 }
 
-                // 2. Standard candidate text (JSON or plain text)
+                // Standard text response parsing
                 const rawText = extractGeminiCandidateText(resJson);
                 if (rawText) {
                     const parsed = parseCopilotResponse(rawText);
@@ -1674,7 +1637,7 @@ export async function askAiCopilot(env, userQuery, context) {
             const addressTitle = isOwner ? "Boss" : (context?.userName || "there");
             if (lastQuotaError) {
                 return {
-                    reply: `🧠 *F.R.I.D.A.Y. Deep Thought • Quota Limit Reached*\n\n${addressTitle}, the reasoning token quota for the flagship model (*${lastQuotaError.model}*) has been exhausted on your Gemini API key for today.\n\n• *Daily Limit:* 20 reasoning queries per day on the Google AI Free Tier.\n• *Protocol:* As instructed, no fallback model was used.\n• *Standard Access:* General questions, expense tracking, and assistant tasks without \`/think\` remain 100% active at sub-second speed.`,
+                    reply: `🧠 *F.R.I.D.A.Y. Deep Thought • Quota Limit Reached*\n\n${addressTitle}, the flagship reasoning token quota has been exhausted for today.\n\n• *Protocol:* As instructed, no fallback model was used.\n• *Standard Access:* General questions, expense tracking, and assistant tasks without \`/think\` remain 100% active at sub-second speed.`,
                     voice_summary: `${addressTitle}, the reasoning token quota has been exhausted for today. Please use regular chat without think command.`,
                     action: null,
                     actions: [],
@@ -1758,7 +1721,6 @@ export function extractGroundingSources(groundingMetadata) {
 export async function getLiveRealtimeFallback(query, context = {}, quickOnly = false) {
     const q = (query || "").toLowerCase();
 
-    // 1. Live Weather (Phnom Penh / Cambodia via Open-Meteo)
     if (/weather|temperature|forecast|rain|sunny|អាកាសធាតុ|ភ្លៀង/i.test(q)) {
         try {
             const url = "https://api.open-meteo.com/v1/forecast?latitude=11.5564&longitude=104.9282&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code&timezone=Asia%2FBangkok";
@@ -1802,7 +1764,6 @@ export async function getLiveRealtimeFallback(query, context = {}, quickOnly = f
         }
     }
 
-    // 2. Live Crypto Market Prices (BTC, ETH, SOL via Binance Spot API)
     if (/bitcoin|btc|crypto|ethereum|eth|solana|sol/i.test(q)) {
         try {
             const url = "https://api.binance.com/api/v3/ticker/price?symbols=%5B%22BTCUSDT%22,%22ETHUSDT%22,%22SOLUSDT%22%5D";
@@ -1834,7 +1795,6 @@ export async function getLiveRealtimeFallback(query, context = {}, quickOnly = f
         }
     }
 
-    // 3. Currency Exchange Rate
     if (/exchange\s+rate|usd\s+to\s+khr|khr\s+to\s+usd|riel|dollar/i.test(q)) {
         return {
             reply: [
@@ -1856,7 +1816,6 @@ export async function getLiveRealtimeFallback(query, context = {}, quickOnly = f
     const userName = context?.userName || (isOwner ? "Boss" : "there");
     const addressUser = isOwner ? "Boss" : userName;
 
-    // 4. Clean Standby Notice for arbitrary searches
     return {
         reply: [
             `🌐 *F.R.I.D.A.Y. • Real-Time Web Grounding*`,
@@ -1891,7 +1850,7 @@ export async function searchLiveWeb(query, limit = 5, env = {}) {
     const results = [];
     const cleanQ = sanitizeSearchQuery(query);
 
-    // 0. Optional Premium AI Search API (Tavily) if user configures TAVILY_API_KEY
+    // Real-time web search via Tavily if configured
     if (env?.TAVILY_API_KEY) {
         try {
             const tavilyResp = await fetch("https://api.tavily.com/search", {
@@ -1926,7 +1885,7 @@ export async function searchLiveWeb(query, limit = 5, env = {}) {
 
     // Parallel execution: Wikipedia Knowledge Base Engine + Google News RSS
     const [wikiResults, newsResults] = await Promise.all([
-        // 1. Wikipedia Knowledge Base Engine (Factual extracts, biographies, awards, winners, history)
+        // Wikipedia Knowledge Base extracts
         (async () => {
             const out = [];
             try {
@@ -1970,7 +1929,7 @@ export async function searchLiveWeb(query, limit = 5, env = {}) {
             return out;
         })(),
 
-        // 2. Google News RSS Search (Live breaking sports, scores, recent articles, current events)
+        // Google News RSS feed for live breaking updates
         (async () => {
             const out = [];
             try {
@@ -2045,7 +2004,7 @@ export async function askGeminiWithGoogleSearch(env, query, context = {}) {
     const timeStr = context?.currentTime || currentTime();
     const tz = context?.timezone || TIME_ZONE;
 
-    // 1. Instant domain telemetry check (Weather, Crypto, Exchange rates)
+    // Direct telemetry check for weather, crypto, or exchange rate queries
     const quickLocalFeed = await getLiveRealtimeFallback(cleanQuery, context, true);
     if (quickLocalFeed) {
         return quickLocalFeed;
@@ -2096,7 +2055,7 @@ EXECUTIVE PRESENTATION & FORMATTING DIRECTIVES:
 4. Language:
    - ${hasKhmerChars ? "The user asked in Khmer; reply fluently and naturally in Khmer." : "Reply in clear, polished English."}`;
 
-    // 2. Try Gemini native google_search tool only when Tavily is NOT configured (preserves unit tests)
+    // Gemini native google_search tool when Tavily is not configured
     if (env?.GEMINI_API_KEY && !env?.TAVILY_API_KEY) {
         const googleSearchPayload = JSON.stringify({
             contents: [{ parts: [{ text: `${systemPrompt}\n\n${addressUser} says: "${cleanQuery}"` }] }],
@@ -2132,7 +2091,7 @@ EXECUTIVE PRESENTATION & FORMATTING DIRECTIVES:
         }
     }
 
-    // 3. High-Precision Real-Time Web Crawler (Tavily AI, Wikipedia Extracts, Google News)
+    // Live web search crawl across Tavily, Wikipedia, and Google News
     const searchResults = await searchLiveWeb(cleanQuery, 5, env);
     const hasSearchResults = Array.isArray(searchResults) && searchResults.length > 0;
 
@@ -2157,7 +2116,7 @@ ${addressUser} asks: "${cleanQuery}"
 Provide a clean, elegant executive briefing addressing ${addressUser}. State facts accurately and bold key names and numbers.`
         : `${systemPrompt}\n\n${addressUser} asks: "${cleanQuery}"\nAnswer directly with clear, concise points.`;
 
-    // 4. Primary Synthesis: Gemini High-Speed Text Model
+    // AI synthesis: Gemini text model
     if (env?.GEMINI_API_KEY) {
         const textPayload = JSON.stringify({
             contents: [{ parts: [{ text: synthesisPrompt }] }],
@@ -2189,7 +2148,7 @@ Provide a clean, elegant executive briefing addressing ${addressUser}. State fac
         }
     }
 
-    // 5. Edge Synthesis Fallback: Cloudflare Workers AI (Llama 3.2 3B)
+    // Synthesis fallback: Cloudflare Workers AI
     if (env?.AI) {
         try {
             const aiResp = await env.AI.run("@cf/meta/llama-3.2-3b-instruct", {
@@ -2212,7 +2171,7 @@ Provide a clean, elegant executive briefing addressing ${addressUser}. State fac
         }
     }
 
-    // 6. Direct Clean Web Snippets Card (if AI synthesis is completely unreachable)
+    // Direct web snippets fallback if models are unreachable
     if (hasSearchResults) {
         const snippetLines = searchResults.slice(0, 3).map(r => `• *[${cleanMd(r.title)}](${r.url})*\n  ${cleanMd(r.snippet)}`);
         const body = `${addressUser}, here is the live search telemetry for *"${cleanMd(cleanQuery)}"*: \n\n${snippetLines.join("\n\n")}`;
@@ -2223,7 +2182,6 @@ Provide a clean, elegant executive briefing addressing ${addressUser}. State fac
         };
     }
 
-    // 7. Standby Notice
     return await getLiveRealtimeFallback(cleanQuery, context, false);
 }
 

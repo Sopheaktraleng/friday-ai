@@ -841,7 +841,7 @@ describe("Core AI & Agentic Intelligence Adjustments", () => {
             const msgs = buildOpenAiMessages(history, "Are you fast?", "You are F.R.I.D.A.Y.");
             expect(msgs[2].content).not.toContain("Gemini 1.5 Flash");
             expect(msgs[2].content).not.toContain("🧠 *F.R.I.D.A.Y. Deep Thought*");
-            expect(msgs[2].content).toContain("Groq LPU hybrid architecture");
+            expect(msgs[2].content).toContain("F.R.I.D.A.Y. custom system");
         });
 
         it("askAiCopilot should prioritize Groq LPU engine for fast routine queries when GROQ_API_KEY is present", async () => {

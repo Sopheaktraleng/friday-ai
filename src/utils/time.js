@@ -115,13 +115,13 @@ export function normalizeReminderTime(timeStr) {
     if (!timeStr || typeof timeStr !== "string") return null;
     const clean = timeStr.trim();
 
-    // 1. 24h format e.g. "15:30", "09:00", "9:30"
+    // 24h format e.g. "15:30", "09:00", "9:30"
     const m24 = clean.match(/^([0-1]?[0-9]|2[0-3]):([0-5][0-9])$/);
     if (m24) {
         return `${m24[1].padStart(2, "0")}:${m24[2]}`;
     }
 
-    // 2. 12h format e.g. "3:30 PM", "3:30pm", "3pm", "03:30 PM", "11:45 am"
+    // 12h format e.g. "3:30 PM", "3pm", "11:45 am"
     const m12 = clean.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/i);
     if (m12) {
         let hour = parseInt(m12[1], 10);
@@ -132,7 +132,7 @@ export function normalizeReminderTime(timeStr) {
         return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
     }
 
-    // 3. Relative format e.g. "in 30 mins", "in 30m", "in 1 hour", "45 mins"
+    // Relative duration format e.g. "in 30 mins", "in 1 hour"
     const mRel = clean.match(/^(?:in\s+)?(\d+)\s*(m|min|mins|minutes|h|hr|hrs|hours)$/i);
     if (mRel) {
         const num = parseInt(mRel[1], 10);

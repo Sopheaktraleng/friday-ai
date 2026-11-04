@@ -21,30 +21,23 @@ export function isCompoundOrMultiAction(text) {
     const clean = text.trim();
     if (clean.startsWith("/")) return false;
 
-    // Explicitly addressed to Friday
     if (/^(?:hey\s+)?friday[,:\s]/i.test(clean)) return true;
 
     const lower = clean.toLowerCase();
 
-    // Check for action conjunctions (e.g. "... and remind me ...", "... and note down ...", "... also log ...")
     const hasActionConjunction = /\b(?:and\s+(?:also\s+)?|also\s+|plus\s+|then\s+)(?:remind|alarm|note(?:\s+down)?|remember|log|track|record|save|add|put|buy|bought|paid|spent|spend)\b/i.test(lower);
     if (hasActionConjunction) return true;
 
-    // Count distinct action signals present in the message
     let signals = 0;
-    // 1. Financial spend or income
     if (/\b(?:paid|spent|bought|cost|expense|income|earned|salary|\$\s*\d+|\d+\s*\$|\d+\s*(?:usd|khr|riel|dollars))\b/i.test(lower)) {
         signals++;
     }
-    // 2. Reminder or alarm
     if (/\b(?:remind(?:\s+me)?|alarm|alert\s+me)\b/i.test(lower)) {
         signals++;
     }
-    // 3. Memory or personal preference note
     if (/\b(?:note\s+down|remember(?:\s+that)?|keep\s+in\s+mind|don't\s+forget\s+that|she\s+likes|she\s+loves|he\s+likes|he\s+loves|i\s+like|i\s+love|my\s+favorite)\b/i.test(lower)) {
         signals++;
     }
-    // 4. Work task logging
     if (/\b(?:done|completed|finished)\s+(?:with\s+|the\s+|all\s+|my\s+)?\b/i.test(lower)) {
         signals++;
     }
@@ -61,30 +54,22 @@ export function isConversationalOrCorrection(text) {
     const clean = text.trim();
     if (clean.startsWith("/")) return false;
 
-    // Compound multi-action commands must go to AI Copilot
     if (isCompoundOrMultiAction(clean)) return true;
 
-    // Real-time search and web queries must go to Google Search Grounding
     if (isRealTimeSearchQuery(clean)) return true;
 
-    // Explicitly addressed to Friday
     if (/^(?:hey\s+)?friday[,:\s]/i.test(clean)) return true;
 
-    // Greetings & casual conversational openers
     if (/^(hi|hello|hey|yo|sup|hiya|howdy|hell|greetings|good\s+(?:morning|afternoon|evening)|what's\s+up|wassup|សួស្តី|ជំរាបសួរ)\b/i.test(clean)) {
         return true;
     }
 
-    // Contains question mark
     if (clean.includes("?")) return true;
 
-    // Conversational question openings
     if (CONVERSATIONAL_QUESTION_WORDS.test(clean)) return true;
 
-    // Negation or corrections (e.g. "40$ is my income not my expensse")
     if (CORRECTION_OR_NEGATION_WORDS.test(clean)) return true;
 
-    // Financial queries or settings
     if (/\b(budget|currency|switch\s+to|change\s+to|set\s+currency|set\s+budget|how\s+much|balance|report|briefing|standup|joke|quote|talk)\b/i.test(clean)) {
         return true;
     }
@@ -127,15 +112,10 @@ export function parseNaturalIncome(text) {
     let currencyHint = null;
     let rawCategory = "";
 
-    // 1. "+500 salary" or "+$50 salary"
     const mPlus = clean.match(/^\+\s*(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel|៛)?(?:\s+(.*))?$/i);
-    // 2. "income 500 salary" or "add income 500"
     const mIncome = clean.match(/^(?:add\s+)?income\s*[:\s]\s*(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel|៛)?(?:\s+(.*))?$/i);
-    // 3. "40$ income", "40$ is income", "500$ salary", "$100 bonus"
     const mSuffix = clean.match(/^(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel|៛)?\s+(?:is\s+)?(?:my\s+)?(income|salary|bonus|deposit|revenue|earnings?|freelance)(?:\s+(.*))?$/i);
-    // 4. "salary 500$", "bonus 100", "deposit 1000"
     const mPrefix = clean.match(/^(salary|bonus|deposit)\s+(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel|៛)?(?:\s+(.*))?$/i);
-    // 5. "earned 50 freelance", "received $100 bonus", "got paid 500"
     const mEarned = clean.match(/^(?:i\s+)?(?:earned|received|got(?:\s+paid)?)\s+(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel|៛)?\s*(?:for|from|as)?\s*(.*)$/i);
 
     if (mPlus) {
@@ -168,7 +148,6 @@ export function parseNaturalIncome(text) {
         return null;
     }
 
-    // Determine category
     let category = "Income";
     let source = null;
     let note = null;
@@ -192,7 +171,6 @@ export function parseNaturalIncome(text) {
     else if (catLower.includes("income")) category = "Income";
     else if (rawCategory.trim()) category = rawCategory.trim();
 
-    // Determine currency
     let currency = null;
     if (currencyHint) {
         const u = currencyHint.toUpperCase();
@@ -224,20 +202,16 @@ export function parseNaturalExpense(text) {
     let clean = text.trim();
     if (clean.startsWith("/")) return null;
 
-    // Never match conversational or corrective messages as expenses!
     if (isConversationalOrCorrection(clean)) {
         return null;
     }
 
-    // Never match if income keywords are present
     if (INCOME_KEYWORDS.test(clean)) {
         return null;
     }
 
-    // 1. Strip target destination phrases (e.g. "to finance hub", "in finance hub", "to ledger", "to cashflow")
     clean = stripTargetSuffix(clean);
 
-    // 2. Detect and strip natural action prefixes (e.g. "add amount", "add expense", "add", "log", "record", "put", "track")
     const hasActionPrefix = /^(?:add\s+(?:an?\s+)?(?:amount|expense)|add|log|record|put|track)\s+/i.test(clean);
     if (hasActionPrefix) {
         clean = clean.replace(/^(?:add\s+(?:an?\s+)?(?:amount|expense)|add|log|record|put|track)\s+/i, "").trim();
@@ -247,7 +221,6 @@ export function parseNaturalExpense(text) {
     let category = null;
     let currencyHint = null;
 
-    // 3. Standalone amount (e.g. "3000 khr", "3000 riel", "3000 ៛", "$5", "5$", "5 usd", or bare "3000" if explicit action prefix / large amount)
     const standaloneMatch = clean.match(/^(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel|៛)?$/i);
     if (standaloneMatch) {
         const rawAmount = Number(standaloneMatch[1].replace("$", ""));
@@ -259,7 +232,6 @@ export function parseNaturalExpense(text) {
         }
     }
 
-    // 4. Standard expense patterns
     if (!amount) {
         const expMatch3 = clean.match(/^(?:i\s+)?(?:spent|paid|bought)\s+(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel|៛)?\s*(?:on|for)?\s*([a-zA-Z0-9\s()@'-]+)$/i);
         const expMatch4 = clean.match(/^(?:i\s+)?(?:spent|paid|bought)\s+([a-zA-Z0-9\s()@'-]+)\s+(?:for|at)?\s+(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel|៛)?$/i);
@@ -289,25 +261,20 @@ export function parseNaturalExpense(text) {
         return null;
     }
 
-    // Clean leading prepositions from category like "for lunch" -> "lunch", "on dinner" -> "dinner"
     category = category.replace(/^(?:for|on)\s+/i, "").trim();
     if (!category) {
         category = "Other";
     }
 
-    // Category safety guards:
-    // Categories must not be overly long sentences
     if (category.length > 25) {
         return null;
     }
 
-    // If category has 3 or more words, ensure it doesn't look like conversational English
     const words = category.split(/\s+/);
     if (words.length >= 3 && STOP_WORDS_IN_CATEGORY.test(category)) {
         return null;
     }
 
-    // Disallow pure stop-words as categories
     if (words.length === 1 && /^(is|was|are|were|the|this|that|not|for|from|to|my|our|your)$/i.test(category)) {
         return null;
     }
@@ -354,27 +321,22 @@ export function isRealTimeSearchQuery(text) {
 
     const lower = clean.toLowerCase();
 
-    // Explicit search requests
     if (/^(?:search(?:\s+for)?|google|look\s+up|browse|find\s+online)\b/i.test(lower)) {
         return true;
     }
 
-    // Weather & climate queries
     if (/\b(?:weather|temperature|forecast|rain|raining|rainy|degrees|humidity|sunny|storm|monsoon|អាកាសធាតុ|ភ្លៀង)\b/i.test(lower)) {
         return true;
     }
 
-    // Live news & world events
     if (/\b(?:news|headline|headlines|what\s+happened)\b/i.test(lower)) {
         return true;
     }
 
-    // Sports scores & matches
     if (/\b(?:who\s+won|football\s+score|match\s+score|premier\s+league|champions\s+league|world\s+cup|arsenal|man\s+united|barcelona|real\s+madrid)\b/i.test(lower)) {
         return true;
     }
 
-    // Crypto & financial markets live spot prices
     if (/\b(?:bitcoin|btc|crypto|ethereum|eth\s+price|solana|gold\s+price\s+today|stock\s+price)\b/i.test(lower)) {
         // Exclude internal budget questions like "my budget" or "can i afford"
         if (!/\b(budget|my\s+expense|my\s+spend|can\s+i\s+afford)\b/i.test(lower)) {
@@ -382,7 +344,6 @@ export function isRealTimeSearchQuery(text) {
         }
     }
 
-    // Showtimes & local entertainment
     if (/\b(?:cinema|movie\s+showtimes?|movies\s+playing|legend\s+cinema|major\s+cineplex|prime\s+cineplex)\b/i.test(lower)) {
         return true;
     }

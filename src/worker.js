@@ -95,7 +95,6 @@ export default {
     async fetch(request, env, ctx) {
         const url = new URL(request.url);
 
-        // 1. Static Dashboard Mini-App Delivery
         if (request.method === "GET" || request.method === "HEAD") {
             if (url.pathname === "/dashboard") {
                 return new Response(request.method === "HEAD" ? null : dashboardHtml, {
@@ -104,12 +103,10 @@ export default {
             }
         }
 
-        // 2. Authenticated Mini-App API Endpoints
         if (url.pathname.startsWith("/api/")) {
             return handleApiRequest(request, env);
         }
 
-        // 3. Webhook endpoint (POST)
         if (request.method === "POST" && url.pathname === "/webhook") {
             if (!env.TELEGRAM_BOT_TOKEN) {
                 return json({ ok: false, error: "Missing TELEGRAM_BOT_TOKEN" }, 500);
@@ -142,7 +139,6 @@ export default {
             return json({ ok: true });
         }
 
-        // 4. Healthcheck endpoint
         if (request.method === "GET") {
             if (url.pathname === "/init-commands" || url.pathname === "/set-commands") {
                 const secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token") || url.searchParams.get("secret");

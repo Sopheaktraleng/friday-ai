@@ -370,12 +370,9 @@ export async function sendDailyScheduledWakeup(env) {
                 const isEnabled = await getUserBriefingMode(env.DB, userId);
                 if (isEnabled === "off") continue;
 
-                // Atomic daily broadcast lock - ensures 100% idempotency (never sends twice)
+                // Atomic daily broadcast lock ensures idempotency
                 const canSend = await claimDailyBroadcast(env.DB, userId, "wakeup", todayStr);
-                if (!canSend) {
-                    console.log(`Wake-up call already sent today for user ${userId}, skipping duplicate.`);
-                    continue;
-                }
+                if (!canSend) continue;
 
                 await sendFridayWakeupCall(env, userId, userId);
             } catch (err) {
@@ -428,12 +425,9 @@ export async function sendDailyScheduledBriefings(env) {
                 const isEnabled = await getUserBriefingMode(env.DB, userId);
                 if (isEnabled === "off") continue;
 
-                // Atomic daily broadcast lock - ensures 100% idempotency (never sends twice)
+                // Atomic daily broadcast lock ensures idempotency
                 const canSend = await claimDailyBroadcast(env.DB, userId, "briefing", todayStr);
-                if (!canSend) {
-                    console.log(`Daily briefing already sent today for user ${userId}, skipping duplicate.`);
-                    continue;
-                }
+                if (!canSend) continue;
 
                 await sendFridayTacticalBriefing(env, userId, userId, { withVoice: true });
             } catch (err) {

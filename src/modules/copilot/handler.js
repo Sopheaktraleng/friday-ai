@@ -45,11 +45,10 @@ export function buildSmartLocalFallback(query, context = {}) {
     const tasks = context.todayWorkTasks || [];
     const rems = context.activeReminders || [];
 
-    // 0. Compound Multi-Action Parser (e.g. "I just paid $8.50 for lunch with Jinie, remind me at 3:30 PM to review design, and note down that she loves matcha")
     const localActions = [];
     const confirmedSummaries = [];
 
-    // 0a. Expense: "paid $8.50 for lunch", "spent $12 on dinner", "bought coffee for 4$"
+    // Parse compound commands: expense
     const expMatch = query.match(/(?:paid|spent|bought)\s+(\$?[0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$|dollars|riel)?\s*(?:for|on)?\s*([^,\.]+?)(?=\s*,\s*|\s+and\s+|\s+remind|\s+note|\s+remember|\s*$)/i);
     if (expMatch) {
         const amt = parseFloat(expMatch[1].replace("$", ""));
@@ -74,7 +73,7 @@ export function buildSmartLocalFallback(query, context = {}) {
         }
     }
 
-    // 0b. Reminder: "remind me at 3:30 PM to review the design file", "remind in 30 mins to check server"
+    // Parse compound commands: reminder
     const remMatch = query.match(/\bremind(?:\s+me)?\s+(?:at\s+|in\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|\d+\s*(?:m|min|mins|minutes|h|hr|hrs|hours))\s*(?:to\s+|for\s+)?([^,\.]+?)(?=\s*,\s*|\s+and\s+|\s+note|\s+remember|\s*$)/i);
     if (remMatch) {
         const rawTime = remMatch[1].trim();
@@ -91,7 +90,7 @@ export function buildSmartLocalFallback(query, context = {}) {
         }
     }
 
-    // 0c. Memory: "note down that she loves matcha lattes", "remember that ..."
+    // Parse compound commands: personal memory
     const memMatch = query.match(/\b(?:note\s+down|remember(?:\s+that)?|keep\s+in\s+mind)\s+(?:that\s+)?([^,\.]+)/i);
     if (memMatch) {
         const fact = memMatch[1].trim();
@@ -105,7 +104,7 @@ export function buildSmartLocalFallback(query, context = {}) {
         }
     }
 
-    // 0d. Work task: "done fixed checkout bug"
+    // Parse compound commands: work log
     const workMatch = query.match(/\b(?:done|completed|finished)\s+([^,\.]+?)(?=\s*,\s*|\s+and\s+|\s+remind|\s+note|\s+remember|\s*$)/i);
     if (workMatch) {
         const taskText = workMatch[1].trim();
@@ -129,7 +128,7 @@ export function buildSmartLocalFallback(query, context = {}) {
         };
     }
 
-    // 1. Correction: "income not expense", "that was income"
+    // Ledger correction handling
     if (q.includes("income not expense") || q.includes("is my income") || q.includes("was income")) {
         const numMatch = q.match(/\$?([0-9]+(?:\.[0-9]+)?)/);
         const amount = numMatch ? parseFloat(numMatch[1]) : 40;
@@ -152,7 +151,7 @@ export function buildSmartLocalFallback(query, context = {}) {
         };
     }
 
-    // 2. Undo / Delete Last Transaction
+    // Transaction reversal / undo
     if (q === "undo" || q.includes("delete last") || q.includes("undo that") || q.includes("cancel last") || q.includes("remove last") || q.startsWith("undo ") || q.startsWith("delete ")) {
         let filter = "any";
         if (q.includes("income")) filter = "income";
@@ -176,7 +175,7 @@ export function buildSmartLocalFallback(query, context = {}) {
         };
     }
 
-    // 3. Clear Ledger
+    // Ledger reset
     if (q.includes("clear all") || q.includes("wipe ledger") || q.includes("reset ledger")) {
         return {
             reply: [
@@ -205,7 +204,7 @@ export function buildSmartLocalFallback(query, context = {}) {
         };
     }
 
-    // 4. Switch Currency
+    // Currency switching
     if (q.includes("currency to usd") || q.includes("switch to usd") || q.includes("use usd") || q.includes("use dollars")) {
         return {
             reply: `💱 *Currency Updated*\n\nDisplay currency switched to **USD**, Boss.`,
@@ -221,7 +220,7 @@ export function buildSmartLocalFallback(query, context = {}) {
         };
     }
 
-    // 5. Set Monthly Budget
+    // Monthly budget configuration
     const budgetMatch = q.match(/(?:budget\s*(?:is|to)?\s*)\$?([0-9]+(?:\.[0-9]+)?)\s*(usd|khr|\$)?/i);
     if (budgetMatch) {
         const bAmount = parseFloat(budgetMatch[1]);
@@ -233,7 +232,7 @@ export function buildSmartLocalFallback(query, context = {}) {
         };
     }
 
-    // 6. "Can I afford..." check
+    // Affordability calculation
     const affordMatch = q.match(/(?:afford|buy|purchase|spend)\s*(?:a|an)?\s*\$?([0-9]+(?:\.[0-9]+)?)/i);
     if (affordMatch) {
         const itemCost = parseFloat(affordMatch[1]);
@@ -259,7 +258,7 @@ export function buildSmartLocalFallback(query, context = {}) {
         };
     }
 
-    // 7. Spending / Expenses inquiry
+    // Spending / Expense inquiry
     if (q.includes("spend") || q.includes("expense") || q.includes("cost") || q.includes("how much") || q.includes("ចាយ")) {
         return {
             reply: [
@@ -275,7 +274,7 @@ export function buildSmartLocalFallback(query, context = {}) {
         };
     }
 
-    // 8. Work / Tasks inquiry
+    // Work / Tasks inquiry
     if (q.includes("task") || q.includes("work") || q.includes("standup") || q.includes("did i log")) {
         const taskLines = tasks.length > 0 
             ? tasks.map((t, i) => `${i + 1}. \`${t.time || "--:--"}\` ${t.task}`).join("\n")
@@ -293,7 +292,7 @@ export function buildSmartLocalFallback(query, context = {}) {
         };
     }
 
-    // 9. Greetings & Casual chit-chat
+    // Conversational greetings
     if (/^(hi|hello|hey|yo|sup|hiya|howdy|hell|good morning|good afternoon|good evening|សួស្តី|ជំរាបសួរ)\b/i.test(q)) {
         const hour = (new Date().getUTCHours() + 7) % 24; // ICT (UTC+7)
         let greeting = "Good day";
@@ -319,7 +318,6 @@ export function buildSmartLocalFallback(query, context = {}) {
         };
     }
 
-    // 10. Clean Default Response
     return {
         reply: `I'm running in offline mode right now, Boss, but your ledger is safe. You can ask about your spending, log tasks, or check your balance anytime.`,
         voice_summary: `I am currently in offline mode, Boss, but standing by for your ledger and task updates.`
@@ -384,7 +382,7 @@ export async function handleAiCopilotQuery(env, chatId, userId, query, from, mes
         let result = null;
 
         // Try conversational AI if keys are present
-        if (env.GEMINI_API_KEY || env.AI) {
+        if (env.GROQ_API_KEY || env.OPENROUTER_API_KEY || env.GEMINI_API_KEY || env.AI) {
             try {
                 result = await askAiCopilot(env, cleanQuery, context);
             } catch (aiErr) {

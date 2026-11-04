@@ -25,10 +25,7 @@ import {
 } from "../db/queries.js";
 import { isConversationalOrCorrection, isCompoundOrMultiAction, isRealTimeSearchQuery, parseNaturalIncome, parseNaturalExpense } from "../utils/natural.js";
 
-// Hub
 import { sendMainHub, sendHelpMessage, sendSettingsMenu, sendUserManagementMenu } from "../modules/hub/views.js";
-
-// Finance
 import {
     sendFinanceHub,
     sendTransactions,
@@ -51,16 +48,12 @@ import {
     handlePdfDocument,
     sendScanHelp
 } from "../modules/finance/scanner.js";
-
-// Work & Tasks
 import {
     handleAddWorkLogCommand,
     handleListTodayTasksCommand,
     handleListTasksHistoryCommand,
     handleTasksMonthStatsCommand
 } from "../modules/work/commands.js";
-
-// Reminders
 import {
     sendRemindersMenu,
     sendFocusMenu
@@ -68,8 +61,6 @@ import {
 import {
     handleRemindCommand
 } from "../modules/reminders/commands.js";
-
-// Voice & Copilot
 import { handleVoiceMessage } from "../modules/voice/handler.js";
 import { handleAiCopilotQuery, sendFridayTacticalBriefing } from "../modules/copilot/handler.js";
 
@@ -256,7 +247,7 @@ export async function handleMessage(message, env, origin) {
         return hasUserPermission(key, guestUser?.permissions, isBoss);
     };
 
-    // 0. Smart Bank Slip & Receipt Scanner (Photo or Image Document)
+    // Receipt and slip image scanning
     if (message.photo || (message.document && message.document.mime_type && message.document.mime_type.startsWith("image/"))) {
         if (!checkFeature("Finance & Receipts", "finance")) {
             await sendFeatureRestricted(env, chatId, "Finance Hub & Receipt Scanning", message.from);
@@ -266,7 +257,7 @@ export async function handleMessage(message, env, origin) {
         return;
     }
 
-    // 0.05. 📄 Smart Bank PDF Statement & Invoice OCR
+    // PDF bank statement and invoice OCR
     if (message.document && (
         message.document.mime_type === "application/pdf" ||
         (message.document.file_name && message.document.file_name.toLowerCase().endsWith(".pdf"))
@@ -279,7 +270,7 @@ export async function handleMessage(message, env, origin) {
         return;
     }
 
-    // 0.1. 🎙️ Voice Note & Audio Transcription (Workers AI Whisper + Gemini Multimodal Fallback)
+    // Voice note audio transcription
     if (message.voice || message.audio || (message.document && message.document.mime_type && message.document.mime_type.startsWith("audio/"))) {
         await handleVoiceMessage(message, env, origin, handleMessage);
         return;
@@ -359,7 +350,7 @@ export async function handleMessage(message, env, origin) {
         return;
     }
 
-    // 0.4 🤖 F.R.I.D.A.Y. Tactical Briefing & Commands
+    // Tactical briefings
     if (
         text === "/friday" || 
         text === "/briefing" || 
@@ -403,7 +394,7 @@ export async function handleMessage(message, env, origin) {
         return;
     }
 
-    // 0.43 🌐 Real-Time Live Google Search Grounding (/search, /web, /google, /weather)
+    // Real-time search grounding
     if (
         text.startsWith("/search") || 
         text.startsWith("/web") || 
@@ -437,7 +428,7 @@ export async function handleMessage(message, env, origin) {
         return;
     }
 
-    // 0.45 🗣️ Direct Speech Command (/speak, /say, /talk)
+    // Speech command
     if (
         text.startsWith("/speak") || 
         text.startsWith("/say") || 
@@ -452,7 +443,6 @@ export async function handleMessage(message, env, origin) {
         }
         const query = text.replace(/^\/(speak|say|talk)(@\w+)?\s*/i, "").trim();
 
-        // 1. If Boss replied to a message with /speak, read that replied message aloud!
         const repliedText = message.reply_to_message?.text;
         if (repliedText) {
             try {
@@ -466,7 +456,6 @@ export async function handleMessage(message, env, origin) {
             }
         }
 
-        // 2. If Boss just typed /speak without any query, read Friday's last response aloud!
         if (!query) {
             const lastMessage = await getLastModelChatMessage(env.DB, userId);
             if (lastMessage) {
@@ -486,12 +475,11 @@ export async function handleMessage(message, env, origin) {
             return;
         }
 
-        // 3. Boss typed /speak <question>: answer and speak back concurrently!
         await handleAiCopilotQuery(env, chatId, userId, query, message.from, null, true);
         return;
     }
 
-    // 0.5. 🤖 AI Financial & Work Copilot
+    // AI Copilot
     if (
         text.startsWith("/ask") || 
         text.startsWith("/ai") || 
@@ -509,7 +497,7 @@ export async function handleMessage(message, env, origin) {
         return;
     }
 
-    // 0.55. 🧠 F.R.I.D.A.Y. Deep Thought & Reasoning Engine (/think)
+    // Deep Thought & Reasoning (/think)
     if (
         text.startsWith("/think") || 
         text.startsWith("/reason") || 
@@ -530,7 +518,7 @@ export async function handleMessage(message, env, origin) {
                 [
                     `🧠 *F.R.I.D.A.Y. • Deep Thought Mode*`,
                     ``,
-                    `Engage my flagship reasoning engine (*gemini-3.6-flash* / high-intelligence models) for complex problem solving, strategic financial runway planning, system architecture, or in-depth analysis.`,
+                    `Engage my flagship deep reasoning engine for complex problem solving, strategic financial runway planning, system architecture, or in-depth analysis.`,
                     ``,
                     `💡 *Usage Examples:*`,
                     `• \`/think How can I cut discretionary expenses by 30% without impacting productivity?\``,
@@ -548,7 +536,7 @@ export async function handleMessage(message, env, origin) {
         return;
     }
 
-    // 0.6. 🧠 F.R.I.D.A.Y. Long-Term Memory & Context Management
+    // Long-Term Memory
     if (text.startsWith("/remember") || text.startsWith("/memorize")) {
         const fact = text.replace(/^\/(remember|memorize)(@\w+)?\s*/i, "").trim();
         if (!fact) {
@@ -718,7 +706,7 @@ export async function handleMessage(message, env, origin) {
         return;
     }
 
-    // 1. Main Navigation & Workspaces
+    // Main navigation
     if (text.startsWith("/start") || text === "/menu" || text.startsWith("/menu@") || text === "/hub" || text.startsWith("/hub@") || text === "/s" || text === "/m") {
         await sendMainHub(env, chatId, userId, message.from, origin);
         return;
@@ -733,7 +721,7 @@ export async function handleMessage(message, env, origin) {
         return;
     }
 
-    // 2. Work & Tasks Workspace
+    // Work & tasks
     if (text.startsWith("/tasks") || text.startsWith("/task") || text.startsWith("/work") || text.startsWith("/worklog") || text === "/w") {
         if (!checkFeature("Tasks", "tasks")) {
             await sendFeatureRestricted(env, chatId, "Task & Work Logging", message.from);
@@ -766,7 +754,7 @@ export async function handleMessage(message, env, origin) {
         return;
     }
 
-    // 3. Reminders & Alarms Commands
+    // Reminders & alarms
     if (text.startsWith("/remind") || text.startsWith("/alarm")) {
         if (!checkFeature("Reminders", "reminders")) {
             await sendFeatureRestricted(env, chatId, "Reminders & Alarms", message.from);
@@ -794,13 +782,13 @@ export async function handleMessage(message, env, origin) {
         return;
     }
 
-    // 3. Movie Watchlist (Retired)
+    // Legacy watchlist redirect
     if (text.startsWith("/watch") || text.startsWith("/movie") || text.startsWith("/film") || text.startsWith("/watchlist")) {
         await sendMainHub(env, chatId, userId, message.from, origin);
         return;
     }
 
-    // 4. Logging Expenses & Income
+    // Expense & income commands
     if (text.startsWith("/add") || text.startsWith("/a ") || text === "/a") {
         if (!checkFeature("Finance", "finance")) {
             await sendFeatureRestricted(env, chatId, "Finance Hub & Expense Logging", message.from);
@@ -827,7 +815,7 @@ export async function handleMessage(message, env, origin) {
         return;
     }
 
-    // 5. Ledger & Summaries
+    // Ledger & summaries
     if (text === "/transactions" || text === "/today" || text === "/t" || text === "/td") {
         if (!checkFeature("Finance", "finance")) {
             await sendFeatureRestricted(env, chatId, "Finance Hub & Ledger", message.from);
@@ -883,7 +871,7 @@ export async function handleMessage(message, env, origin) {
         return;
     }
 
-    // 6. Settings & Budget
+    // Settings & budget
     if (text.startsWith("/budget") || text.startsWith("/b ") || text === "/b") {
         if (!checkFeature("Finance", "finance")) {
             await sendFeatureRestricted(env, chatId, "Budget Settings", message.from);
@@ -921,7 +909,7 @@ export async function handleMessage(message, env, origin) {
         return;
     }
 
-    // 6.1 👥 Dynamic User Access Management (/users, /share, /whitelist)
+    // Access management (/users, /share, /whitelist)
     if (text === "/users" || text.startsWith("/users ") || text === "/share" || text.startsWith("/share ") || text.startsWith("/whitelist")) {
         if (!isOwner(userId, env)) {
             await sendMessage(
@@ -1045,9 +1033,7 @@ export async function handleMessage(message, env, origin) {
         return;
     }
 
-    // =========================================================================
-    // Smart Natural Text Detection (Zero Command Friction!)
-    // =========================================================================
+    // Natural conversational text detection
     if (!text.startsWith("/")) {
         // In group chats, ignore arbitrary conversational text unless directly replying to the bot
         if (isGroup && !message.reply_to_message?.from?.is_bot) {
@@ -1056,10 +1042,9 @@ export async function handleMessage(message, env, origin) {
 
         const lower = text.toLowerCase();
 
-        // 0. Compound Multi-Action Voice & Text Commands (Direct to AI Copilot)
-        // e.g. "Hey Friday, I just paid $8.50 for lunch with Jinie, remind me at 3:30 PM to review design, and note down that she loves matcha"
+        // Compound multi-action intent
         if (isCompoundOrMultiAction(text)) {
-            if (env.GEMINI_API_KEY || env.AI) {
+            if (env.GROQ_API_KEY || env.OPENROUTER_API_KEY || env.GEMINI_API_KEY || env.AI) {
                 let queryText = text;
                 if (/^(?:hey\s+)?friday[,:]?\s+/i.test(queryText)) {
                     queryText = queryText.replace(/^(?:hey\s+)?friday[,:]?\s+/i, "");
@@ -1070,16 +1055,15 @@ export async function handleMessage(message, env, origin) {
             }
         }
 
-        // 0.1 🌐 Real-Time Search & Web Queries (Live Weather, Markets, Sports, News)
+        // Real-time web search grounding
         if (isRealTimeSearchQuery(text)) {
             await handleRealTimeSearchCommand(env, chatId, userId, text, message);
             return;
         }
 
-        // 0.2 Conversational Greetings, Questions & Small Talk (Direct to AI Copilot)
-        // e.g. "hi", "hello", "hey", "how are you", "can I afford $50", "40$ is income not expense"
+        // Conversational chat and corrections
         if (isConversationalOrCorrection(text)) {
-            if (env.GEMINI_API_KEY || env.AI) {
+            if (env.GROQ_API_KEY || env.OPENROUTER_API_KEY || env.GEMINI_API_KEY || env.AI) {
                 let queryText = text;
                 if (/^(?:hey\s+)?friday[,:]?\s+/i.test(queryText)) {
                     queryText = queryText.replace(/^(?:hey\s+)?friday[,:]?\s+/i, "");
@@ -1090,7 +1074,7 @@ export async function handleMessage(message, env, origin) {
             }
         }
 
-        // 1. Natural Navigation Keywords (Explicit menu/dashboard requests only)
+        // Navigation shortcuts
         if (lower === "menu" || lower === "hub" || lower === "start" || lower === "dashboard") {
             await sendMainHub(env, chatId, userId, message.from, origin);
             return;
@@ -1155,7 +1139,7 @@ export async function handleMessage(message, env, origin) {
             return;
         }
 
-        // 2. Natural Reminder: e.g. "remind 17:30 Bring lunch box", "remind in 30m Check oven", "remind 9am Standup"
+        // Natural reminder commands: e.g. "remind 17:30 Bring lunch box", "remind in 30m Check oven"
         if (lower.startsWith("remind ") || lower.startsWith("remindme ") || lower.startsWith("alarm ")) {
             if (!checkFeature("Reminders", "reminders")) {
                 await sendFeatureRestricted(env, chatId, "Reminders & Alarms", message.from);
@@ -1165,7 +1149,7 @@ export async function handleMessage(message, env, origin) {
             return;
         }
 
-        // 3. Natural Work Logging: e.g. "done fixed checkout bug", "did code review", "finished report"
+        // Work logging
         if (
             lower.startsWith("done ") || 
             lower.startsWith("did ") || 
@@ -1184,7 +1168,7 @@ export async function handleMessage(message, env, origin) {
             }
         }
 
-        // 4. Natural Undo / Delete Last
+        // Undo & delete last transaction
         if (
             lower === "undo" || 
             lower === "undo last" || 
@@ -1204,7 +1188,7 @@ export async function handleMessage(message, env, origin) {
             return;
         }
 
-        // Targeted Natural Undo (e.g. "undo coffee", "delete lunch", "delete income 178$", "undo 178$")
+        // Targeted undo
         const undoMatch = lower.match(/^(?:undo|delete|remove|cancel)\s+(?:my\s+)?(?:last\s+)?([a-zA-Z0-9$៛\s.'-]+)$/);
         if (undoMatch) {
             const targetFilter = undoMatch[1].trim();
@@ -1218,7 +1202,7 @@ export async function handleMessage(message, env, origin) {
             }
         }
 
-        // 5. Natural Income: e.g. "+500 salary", "income 500", "40$ income", "500$ salary", "earned $50 freelance"
+        // Natural income logging
         const incData = parseNaturalIncome(text);
         if (incData) {
             if (!checkFeature("Finance", "finance")) {
@@ -1256,7 +1240,7 @@ export async function handleMessage(message, env, origin) {
             return;
         }
 
-        // 6. Natural Expense: e.g. "5 coffee", "$5 coffee", "5$ coffee", "10000 lunch", "coffee 5", "spent $15 on dinner"
+        // Natural expense logging
         const expData = parseNaturalExpense(text);
         if (expData) {
             if (!checkFeature("Finance", "finance")) {
@@ -1295,8 +1279,8 @@ export async function handleMessage(message, env, origin) {
             return;
         }
 
-        // 6. Natural Language F.R.I.D.A.Y. AI Copilot fallback (or friendly guidance if AI not configured)
-        if (env.GEMINI_API_KEY || env.AI) {
+        // AI Copilot conversational fallback
+        if (env.GROQ_API_KEY || env.OPENROUTER_API_KEY || env.GEMINI_API_KEY || env.AI) {
             if (!checkFeature("AI Dialog", "ai_dialog")) {
                 await sendFeatureRestricted(env, chatId, "AI Dialog & Assistant", message.from);
                 return;

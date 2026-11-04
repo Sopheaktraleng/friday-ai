@@ -144,7 +144,7 @@ export async function handleCallback(callback, env, origin) {
         guestUser = await getAuthorizedUser(env.DB, userId);
     }
 
-    // --- Dynamic User Access Management (Boss & Guest Workflow) ---
+    // Dynamic User Access Management (Boss & Guest Workflow)
     if (data.startsWith("request_access")) {
         const fromUser = callback.from || {};
         const requesterId = String(fromUser.id || userId);
@@ -391,7 +391,7 @@ export async function handleCallback(callback, env, origin) {
         }
     }
 
-    // --- Main Hub, Finance Hub & Settings ---
+    // Main Hub, Finance Hub & Settings
     if (data === "menu" || data === "hub") {
         await sendMainHub(env, chatId, userId, callback.from, origin, messageId);
         return;
@@ -407,7 +407,7 @@ export async function handleCallback(callback, env, origin) {
         return;
     }
 
-    // --- Work & Tasks Callbacks ---
+    // Work & Tasks Callbacks
     if (data === "tasks_today" || data === "work_hub" || data === "work_today") {
         await handleListTodayTasksCommand(env, chatId, userId, messageId);
         return;
@@ -492,7 +492,7 @@ export async function handleCallback(callback, env, origin) {
         return;
     }
 
-    // --- Adding Transactions ---
+    // Adding Transactions
     if (data === "add_expense") {
         await sendCategoryPicker(env, chatId, "expense", messageId);
         return;
@@ -533,7 +533,7 @@ export async function handleCallback(callback, env, origin) {
         return;
     }
 
-    // --- 1-Tap Re-log from Recent Favorites or Default Presets ---
+    // 1-Tap Re-log from Recent Favorites or Default Presets
     if (data.startsWith("relog_tx:")) {
         const txId = parseInt(data.replace("relog_tx:", ""), 10);
         const row = await env.DB.prepare(
@@ -608,7 +608,7 @@ export async function handleCallback(callback, env, origin) {
         return;
     }
 
-    // --- Undo / Delete Transaction Callback ---
+    // Undo / Delete Transaction Callback
     if (data.startsWith("undo_tx:")) {
         const txId = parseInt(data.slice(8), 10);
         const deleted = await deleteExpenseById(env.DB, userId, txId);
@@ -647,7 +647,7 @@ export async function handleCallback(callback, env, origin) {
         return;
     }
 
-    // --- Lunch Box Alarm Callbacks ---
+    // Lunch Box Alarm Callbacks
     if (data === "lunchbox") {
         await sendLunchboxMenu(env, chatId, userId, messageId);
         return;
@@ -737,7 +737,7 @@ export async function handleCallback(callback, env, origin) {
         return;
     }
 
-    // --- General Reminders Callbacks ---
+    // General Reminders Callbacks
     if (data === "reminders") {
         await sendRemindersMenu(env, chatId, userId, messageId);
         return;
@@ -1147,7 +1147,7 @@ export async function handleCallback(callback, env, origin) {
         return;
     }
 
-    // --- Ledger & Summaries Callbacks ---
+    // Ledger & Summaries Callbacks
     if (data === "view_transactions") {
         await sendTransactions(env, chatId, userId, messageId);
         return;
@@ -1174,7 +1174,7 @@ export async function handleCallback(callback, env, origin) {
         return;
     }
 
-    // --- Clear Data Callbacks ---
+    // Clear Data Callbacks
     if (data === "clear_data") {
         await askClearConfirmation(env, chatId, messageId);
         return;
@@ -1271,7 +1271,7 @@ export async function handleCallback(callback, env, origin) {
         return;
     }
 
-    // --- F.R.I.D.A.Y. Memory Callbacks ---
+    // F.R.I.D.A.Y. Memory Callbacks
     if (data === "view_memories") {
         const memories = await getUserMemories(env.DB, userId, 25);
         if (!memories || memories.length === 0) {
@@ -1359,7 +1359,7 @@ export async function handleCallback(callback, env, origin) {
         return;
     }
 
-    // --- Voice & Speech Callbacks ---
+    // Voice & Speech Callbacks
     if (data === "speak_last") {
         await answerCallback(env, callback.id, { text: "🎙️ Reading aloud..." });
         try {
@@ -1390,7 +1390,7 @@ export async function handleCallback(callback, env, origin) {
         return;
     }
 
-    // --- Bank Slip / Receipt Scanner Callbacks ---
+    // Bank Slip / Receipt Scanner Callbacks
     if (data === "scan_prompt") {
         await sendScanHelp(env, chatId, messageId);
         return;
@@ -1434,7 +1434,7 @@ export async function handleCallback(callback, env, origin) {
         return;
     }
 
-    // --- Bank PDF Statement Callbacks ---
+    // Bank PDF Statement Callbacks
     if (data.startsWith("stmt_import:")) {
         const stmtId = parseInt(data.slice(12), 10);
         await handleStatementImport(env, chatId, userId, stmtId, callback.message?.message_id, callback.id);

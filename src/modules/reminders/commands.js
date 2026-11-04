@@ -15,7 +15,7 @@ export function parseReminderInput(raw, now = new Date()) {
     let mins = 0;
     let title = "";
 
-    // 1. Check relative: e.g. "in 30m check oven", "30 mins call mom", "in 1h check server"
+    // Relative duration format: e.g. "in 30m check oven", "30 mins call mom"
     const relMatch = clean.match(/^(?:in\s+)?(\d+)\s*(minutes|minute|mins|min|hours|hour|hrs|hr|m|h)\s*(.*)$/i);
     if (relMatch) {
         const num = parseInt(relMatch[1], 10);
@@ -67,7 +67,7 @@ export function parseReminderInput(raw, now = new Date()) {
 
     let workingStr = clean;
 
-    // 2. Time extraction (extract time first so hour numbers in 17:30 are not confused with dates)
+    // Time extraction with AM/PM and 24h support
     const ampmMatch = workingStr.match(/(?:(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm))/i);
     if (ampmMatch) {
         let hour = parseInt(ampmMatch[1], 10);
@@ -89,7 +89,7 @@ export function parseReminderInput(raw, now = new Date()) {
         }
     }
 
-    // 3. Date parsing:
+    // Date extraction and recurrence inference
     const localFormatter = new Intl.DateTimeFormat("en-CA", {
         timeZone: TIME_ZONE,
         year: "numeric",
