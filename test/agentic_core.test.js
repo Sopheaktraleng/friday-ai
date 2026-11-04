@@ -833,6 +833,17 @@ describe("Core AI & Agentic Intelligence Adjustments", () => {
             expect(msgs[3]).toEqual({ role: "user", content: "What did I just log?" });
         });
 
+        it("buildOpenAiMessages should sanitize deep thought headers and legacy Gemini 1.5 Flash hallucinations", () => {
+            const history = [
+                { role: "user", content: "what ai model are u using" },
+                { role: "model", content: "🧠 *F.R.I.D.A.Y. Deep Thought*\n\nI'm running on Google's Gemini 1.5 Flash model, Boss." }
+            ];
+            const msgs = buildOpenAiMessages(history, "Are you fast?", "You are F.R.I.D.A.Y.");
+            expect(msgs[2].content).not.toContain("Gemini 1.5 Flash");
+            expect(msgs[2].content).not.toContain("🧠 *F.R.I.D.A.Y. Deep Thought*");
+            expect(msgs[2].content).toContain("Groq LPU hybrid architecture");
+        });
+
         it("askAiCopilot should prioritize Groq LPU engine for fast routine queries when GROQ_API_KEY is present", async () => {
             fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
                 if (String(url).includes("groq.com")) {

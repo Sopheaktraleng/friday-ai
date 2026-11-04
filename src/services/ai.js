@@ -813,6 +813,12 @@ ${isThinking ? `     * DEEP REASONING & STRATEGIC ANALYSIS (ACTIVE via /think):
      * Ground all advice and conversation strictly in the REAL WORLD. Speak with natural warmth, intelligence, and polish.
      * ${isOwner ? "Address the user with professional loyalty and warmth as 'Boss'." : `Address the user as '${userName}' (or speak naturally). NEVER call them 'Boss'.`}
      * STRICTLY AVOID referencing Marvel, Iron Man, Tony Stark, Ultron, arc reactors, superhero suits, or comic/movie lore. Speak as an elite real-world executive chief of staff.
+   - AI Architecture & Engine Identity:
+     * When asked what AI model, engine, or architecture powers you, explain your live multi-AI engine:
+       - Routine Chat & Speed: Groq LPU (Qwen 27B) for instant ~200ms conversational responses.
+       - Deep Thought (/think): Groq LPU 120B MoE reasoning engine (openai/gpt-oss-120b) for complex math, runway projections, and logic.
+       - Vision & Documents: Google Gemini for receipt scanning and PDF invoice analysis.
+     * NEVER claim you are simply Gemini 1.5 Flash or ChatGPT.
    - Casual Chit-Chat:
      * If ${userLabel} says "hi", "how are you", "say anything", tells a joke, or makes small talk: respond with wit, warmth, and charm in 1-2 friendly human sentences. Never dump an unprompted status report. ${!isOwner ? "Do NOT call them Boss." : ""}
    - TOOL USAGE EFFICIENCY (CRITICAL):
@@ -1262,7 +1268,15 @@ export function buildOpenAiMessages(chatHistory = [], currentQuery, systemPrompt
     for (const h of chatHistory) {
         if (!h.content) continue;
         const role = (h.role === "model" || h.role === "assistant") ? "assistant" : "user";
-        messages.push({ role, content: h.content });
+        let content = h.content;
+        if (role === "assistant") {
+            content = content.replace(/^🧠\s*\*F\.R\.I\.D\.A\.Y\.\s+Deep\s+Thought\*\s*\n+/i, "").trim();
+            if (/Gemini\s*1\.5\s*Flash/i.test(content)) {
+                content = content.replace(/Google[’']s\s*\*?Gemini\s*1\.5\s*Flash\*?\s*model/gi, "Groq LPU hybrid architecture")
+                                 .replace(/\*?Gemini\s*1\.5\s*Flash\*?\s*model/gi, "Groq LPU hybrid architecture");
+            }
+        }
+        messages.push({ role, content });
     }
     messages.push({ role: "user", content: currentQuery });
     return messages;
@@ -1307,6 +1321,31 @@ export async function callOpenAiCompatibleApi({
             if (!resp.ok) {
                 const errText = await resp.text().catch(() => "");
                 console.warn(`OpenAI-compatible model ${model} failed (${resp.status}):`, errText);
+                // If strict JSON grammar validation failed, retry immediately without response_format constraint
+                if (resp.status === 400 && jsonMode && (errText.includes("json_validate_failed") || errText.includes("output_parse_failed"))) {
+                    try {
+                        const fallbackBody = { ...body };
+                        delete fallbackBody.response_format;
+                        const retryResp = await fetch(cleanUrl, {
+                            method: "POST",
+                            headers: {
+                                "Authorization": `Bearer ${apiKey}`,
+                                "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify(fallbackBody),
+                            signal: AbortSignal.timeout(timeoutMs)
+                        });
+                        if (retryResp.ok) {
+                            const retryJson = await retryResp.json();
+                            const retryText = retryJson?.choices?.[0]?.message?.content?.trim();
+                            if (retryText) {
+                                return { text: retryText, model };
+                            }
+                        }
+                    } catch (retryErr) {
+                        console.warn(`Retry without response_format failed on ${model}:`, retryErr.message);
+                    }
+                }
                 continue;
             }
 
