@@ -1327,7 +1327,66 @@ export async function askAiCopilot(env, userQuery, context) {
     const prompt = buildCopilotPrompt(userQuery, context);
     const isThinkingMode = context?.isThinking === true;
 
-    // 1. FAST PERFORMANCE ENGINE: Groq LPU (~250-500ms) for routine chat, logging, and questions
+    // 1. DEEP THINKING ENGINE: For /think queries, prioritize Flagship Groq 120B Reasoning or OpenRouter
+    if (isThinkingMode) {
+        if (env?.GROQ_API_KEY) {
+            try {
+                const groqThinkingMessages = buildOpenAiMessages(context?.chatHistory || [], userQuery, prompt);
+                const groqRes = await callOpenAiCompatibleApi({
+                    apiKey: env.GROQ_API_KEY,
+                    baseUrl: "https://api.groq.com/openai/v1",
+                    models: [env?.GROQ_THINKING_MODEL, "openai/gpt-oss-120b", "qwen/qwen3.8-27b"].filter(Boolean),
+                    messages: groqThinkingMessages,
+                    temperature: 0.25,
+                    jsonMode: true,
+                    timeoutMs: 8000
+                });
+
+                if (groqRes && groqRes.text) {
+                    const parsed = parseCopilotResponse(groqRes.text);
+                    if (parsed && (parsed.reply || (parsed.actions && parsed.actions.length > 0))) {
+                        return {
+                            ...parsed,
+                            engine: "groq_reasoning",
+                            model: groqRes.model
+                        };
+                    }
+                }
+            } catch (err) {
+                console.warn("Groq reasoning engine error, cascading:", err.message);
+            }
+        }
+
+        if (env?.OPENROUTER_API_KEY) {
+            try {
+                const orMessages = buildOpenAiMessages(context?.chatHistory || [], userQuery, prompt);
+                const orRes = await callOpenAiCompatibleApi({
+                    apiKey: env.OPENROUTER_API_KEY,
+                    baseUrl: "https://openrouter.ai/api/v1",
+                    models: [env?.OPENROUTER_MODEL, ...OPENROUTER_MODELS].filter(Boolean),
+                    messages: orMessages,
+                    temperature: 0.35,
+                    jsonMode: true,
+                    timeoutMs: 7000
+                });
+
+                if (orRes && orRes.text) {
+                    const parsed = parseCopilotResponse(orRes.text);
+                    if (parsed && (parsed.reply || (parsed.actions && parsed.actions.length > 0))) {
+                        return {
+                            ...parsed,
+                            engine: "openrouter",
+                            model: orRes.model
+                        };
+                    }
+                }
+            } catch (orErr) {
+                console.warn("OpenRouter deep thinking error, cascading to Gemini:", orErr.message);
+            }
+        }
+    }
+
+    // 2. FAST PERFORMANCE ENGINE: Groq LPU (~250-500ms) for routine chat, logging, and questions
     if (!isThinkingMode && env?.GROQ_API_KEY) {
         try {
             const groqMessages = buildOpenAiMessages(context?.chatHistory || [], userQuery, prompt);
@@ -1353,35 +1412,6 @@ export async function askAiCopilot(env, userQuery, context) {
             }
         } catch (groqErr) {
             console.warn("Groq fast copilot error, cascading to Gemini:", groqErr.message);
-        }
-    }
-
-    // 2. DEEP THINKING ENGINE: OpenRouter reasoning for /think queries
-    if (isThinkingMode && env?.OPENROUTER_API_KEY) {
-        try {
-            const orMessages = buildOpenAiMessages(context?.chatHistory || [], userQuery, prompt);
-            const orRes = await callOpenAiCompatibleApi({
-                apiKey: env.OPENROUTER_API_KEY,
-                baseUrl: "https://openrouter.ai/api/v1",
-                models: [env?.OPENROUTER_MODEL, ...OPENROUTER_MODELS].filter(Boolean),
-                messages: orMessages,
-                temperature: 0.4,
-                jsonMode: true,
-                timeoutMs: 6500
-            });
-
-            if (orRes && orRes.text) {
-                const parsed = parseCopilotResponse(orRes.text);
-                if (parsed && (parsed.reply || (parsed.actions && parsed.actions.length > 0))) {
-                    return {
-                        ...parsed,
-                        engine: "openrouter",
-                        model: orRes.model
-                    };
-                }
-            }
-        } catch (orErr) {
-            console.warn("OpenRouter deep thinking error, cascading to Gemini:", orErr.message);
         }
     }
 

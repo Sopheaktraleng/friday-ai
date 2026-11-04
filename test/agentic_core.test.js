@@ -932,5 +932,34 @@ describe("Core AI & Agentic Intelligence Adjustments", () => {
             expect(result.engine).toBe("openrouter");
             expect(result.reply).toContain("runway is 14 months");
         });
+
+        it("askAiCopilot should route /think queries to Groq 120B reasoning engine when GROQ_API_KEY is present", async () => {
+            fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+                if (String(url).includes("groq.com")) {
+                    return new Response(JSON.stringify({
+                        choices: [{
+                            message: {
+                                content: JSON.stringify({
+                                    reply: "Groq Reasoning: Your runway is 28 months.",
+                                    actions: []
+                                })
+                            }
+                        }]
+                    }), { status: 200, headers: { "Content-Type": "application/json" } });
+                }
+                return new Response("{}", { status: 500 });
+            });
+
+            const env = {
+                GROQ_API_KEY: "mock_groq_key",
+                GEMINI_API_KEY: "mock_gemini_key"
+            };
+            const context = { isThinking: true, chatHistory: [] };
+            const result = await askAiCopilot(env, "Analyze my financial runway", context);
+
+            expect(result).toBeDefined();
+            expect(result.engine).toBe("groq_reasoning");
+            expect(result.reply).toContain("runway is 28 months");
+        });
     });
 });
