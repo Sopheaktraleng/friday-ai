@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/Speed%20Engine-Groq%20LPU%20(Qwen%2027B)-F05032?style=flat-square" alt="Groq LPU" />
   <img src="https://img.shields.io/badge/Reasoning%20Engine-Groq%20120B%20MoE%20(/think)-blueviolet?style=flat-square" alt="Groq 120B MoE" />
   <img src="https://img.shields.io/badge/Vision%20OCR-Google%20Gemini%20Multimodal-4285F4?style=flat-square&logo=google" alt="Google Gemini" />
-  <img src="https://img.shields.io/badge/Tests-202%20Passed-brightgreen?style=flat-square" alt="Tests" />
+  <img src="https://img.shields.io/badge/Tests-209%20Passed-brightgreen?style=flat-square" alt="Tests" />
   <img src="https://img.shields.io/badge/Platform-Telegram-0088cc?style=flat-square&logo=telegram" alt="Telegram" />
   <img src="https://img.shields.io/badge/License-ISC-green?style=flat-square" alt="License" />
 </p>
@@ -220,7 +220,7 @@ The test suite runs with [Vitest](https://vitest.dev/):
 npm test
 ```
 
-All **202 unit tests** verify:
+All **209 unit tests** verify:
 * Specialized AI routing (Groq LPU, Groq MoE, Gemini, Workers AI)
 * Deep Thought no-fallback protocol (`/think`)
 * Bank PDF statement analysis & receipt OCR extraction

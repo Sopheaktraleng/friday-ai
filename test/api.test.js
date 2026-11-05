@@ -32,6 +32,16 @@ describe("API Authentication Handler", () => {
         expect(auth.status).toBe(401);
     });
 
+    it("should reject request when non-localhost URL spoofs Host: localhost header", async () => {
+        const req = new Request("https://cashflow.workers.dev/api/data?user_id=12345", {
+            headers: { host: "localhost" }
+        });
+        const env = { TELEGRAM_BOT_TOKEN: "mock_token" };
+        const auth = await authenticateApiRequest(req, env);
+        expect(auth.error).toBe("Unauthorized: Telegram WebApp authentication required");
+        expect(auth.status).toBe(401);
+    });
+
     it("should reject request when Telegram Init Data hash is invalid", async () => {
         const fakeInitData = "query_id=test&user=%7B%22id%22%3A12345%7D&auth_date=1700000000&hash=badhash";
         const req = new Request("https://cashflow.workers.dev/api/data", {

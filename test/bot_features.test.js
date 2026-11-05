@@ -164,6 +164,12 @@ describe("Bot Improvements & Stability", () => {
             expect(p5.timeStr).toBe("18:00");
             expect(p5.title).toBe("Take ice");
             expect(p5.frequency).toBe("once");
+
+            // 6. Bare numeric quantity in reminder title should NOT be parsed as date
+            const p6 = parseReminderInput("remind me to buy 2 notebooks at 4pm", fakeNow);
+            expect(p6.targetDateStr).toBeNull();
+            expect(p6.timeStr).toBe("16:00");
+            expect(p6.title).toBe("Buy 2 notebooks");
         });
 
         it("should display expired past reminders as completed and offer re-arm in sendReminderTimeMenu", async () => {
@@ -902,6 +908,24 @@ describe("Bot Improvements & Stability", () => {
     });
 
     describe("Webhook Security & Secret Verification", () => {
+        it("should reject webhook request if secret header is missing when WEBHOOK_SECRET is set", async () => {
+            const req = new Request("https://cashflow.workers.dev/webhook", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ update_id: 1 })
+            });
+
+            const env = {
+                TELEGRAM_BOT_TOKEN: "mock_token",
+                WEBHOOK_SECRET: "super_secret_token"
+            };
+
+            const res = await worker.fetch(req, env, {});
+            expect(res.status).toBe(401);
+        });
+
         it("should reject webhook request if header does not match WEBHOOK_SECRET", async () => {
             const req = new Request("https://cashflow.workers.dev/webhook", {
                 method: "POST",
@@ -2207,6 +2231,29 @@ describe("Bot Improvements & Stability", () => {
             expect(rows[1]).toEqual([{ text: "💡 Help & Guide", callback_data: "help" }]);
             expect(rows[2]).toEqual([{ text: "⚙️ Settings", callback_data: "settings" }]);
 
+            fetchSpy.mockRestore();
+        });
+    });
+
+    describe("Worker Scheduled Cron Handler", () => {
+        it("scheduled should trigger wake-up broadcast on dedicated wakeup cron", async () => {
+            const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+                Promise.resolve(new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }))
+            );
+            const mockDb = {
+                batch: vi.fn().mockResolvedValue([]),
+                prepare: vi.fn().mockImplementation(() => ({
+                    bind: vi.fn().mockReturnValue({
+                        all: vi.fn().mockResolvedValue({ results: [{ user_id: "849550186" }] }),
+                        first: vi.fn().mockResolvedValue(null),
+                        run: vi.fn().mockResolvedValue({ meta: { changes: 1 } })
+                    })
+                }))
+            };
+            const mockEnv = { DB: mockDb, TELEGRAM_BOT_TOKEN: "mock_token", ALLOWED_USER_IDS: "849550186" };
+
+            await worker.scheduled({ cron: "50 0 * * *" }, mockEnv);
+            expect(fetchSpy).toHaveBeenCalled();
             fetchSpy.mockRestore();
         });
     });

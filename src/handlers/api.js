@@ -24,10 +24,10 @@ export async function authenticateApiRequest(request, env) {
         return { userId: validated.userId, user: validated.user };
     }
 
-    // Allow dev bypass on localhost or if no bot token is configured
-    const host = request.headers.get("host") || "";
-    const isLocalhost = host.includes("localhost") || host.includes("127.0.0.1");
-    if (isLocalhost || !env.TELEGRAM_BOT_TOKEN) {
+    // Allow dev bypass on localhost only in non-production or if no bot token is configured
+    const isLocalhost = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+    const isDevEnv = env.ENVIRONMENT !== "production";
+    if ((isLocalhost && isDevEnv) || !env.TELEGRAM_BOT_TOKEN) {
         if (!requestedUserId) {
             return { error: "Missing user_id parameter", status: 400 };
         }

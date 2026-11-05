@@ -140,31 +140,42 @@ export function parseReminderInput(raw, now = new Date()) {
         }
     }
 
-    // Check "on (the )?(\d{1,2})(?:st|nd|rd|th)?(?:\s+(?:of\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)?" (Day first)
+    // Check "on (the )?(\d{1,2})" / "the (\d{1,2})" / "(\d{1,2})(st|nd|rd|th)" or "(\d{1,2}) (of )?month" (Day first)
     if (!targetDateStr) {
-        const dateMatch = workingStr.match(/\b(?:on\s+)?(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)?(?:\s+(?:of\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)?\b(?!\s*:)/i);
-        if (dateMatch) {
-            const dayNum = parseInt(dateMatch[1], 10);
+        // 1. With explicit month: e.g. "2nd of Nov", "2 Nov", "on 2nd November"
+        const dayMonthMatch = workingStr.match(/\b(?:on\s+)?(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b(?!\s*:)/i);
+        if (dayMonthMatch) {
+            const dayNum = parseInt(dayMonthMatch[1], 10);
+            const mKey = dayMonthMatch[2].toLowerCase();
+            if (monthMap[mKey] && dayNum >= 1 && dayNum <= 31) {
+                let targetMonth = monthMap[mKey];
+                let targetYear = curYear;
+                if (targetMonth < curMonth) targetYear += 1;
+                targetDateStr = `${targetYear}-${String(targetMonth).padStart(2, "0")}-${String(dayNum).padStart(2, "0")}`;
+                workingStr = workingStr.replace(dayMonthMatch[0], "").trim();
+                frequency = "once";
+            }
+        }
+    }
+
+    if (!targetDateStr) {
+        // 2. Day only (must have "on", "the", or ordinal suffix st|nd|rd|th to avoid matching quantities like "buy 2 apples")
+        // e.g. "on 30th", "on the 15", "the 30th", "take the ice on 30th", "call dentist on 25"
+        const dayOnlyMatch = workingStr.match(/\b(?:(?:on\s+(?:the\s+)?|the\s+)(\d{1,2})(?:st|nd|rd|th)?|(\d{1,2})(?:st|nd|rd|th))\b(?!\s*:)/i);
+        if (dayOnlyMatch) {
+            const dayNum = parseInt(dayOnlyMatch[1] || dayOnlyMatch[2], 10);
             if (dayNum >= 1 && dayNum <= 31) {
                 let targetMonth = curMonth;
                 let targetYear = curYear;
-                if (dateMatch[2]) {
-                    const mKey = dateMatch[2].toLowerCase();
-                    if (monthMap[mKey]) {
-                        targetMonth = monthMap[mKey];
-                        if (targetMonth < curMonth) targetYear += 1;
-                    }
-                } else {
-                    if (dayNum < curDay) {
-                        targetMonth += 1;
-                        if (targetMonth > 12) {
-                            targetMonth = 1;
-                            targetYear += 1;
-                        }
+                if (dayNum < curDay) {
+                    targetMonth += 1;
+                    if (targetMonth > 12) {
+                        targetMonth = 1;
+                        targetYear += 1;
                     }
                 }
                 targetDateStr = `${targetYear}-${String(targetMonth).padStart(2, "0")}-${String(dayNum).padStart(2, "0")}`;
-                workingStr = workingStr.replace(dateMatch[0], "").trim();
+                workingStr = workingStr.replace(dayOnlyMatch[0], "").trim();
                 frequency = "once";
             }
         }
