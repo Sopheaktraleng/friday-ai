@@ -334,71 +334,33 @@ export async function sendHelpMessage(env, chatId, messageId = null, userId = nu
     const hasReminders = isBoss || hasUserPermission("reminders", permissionsStr, isBoss);
     const hasAiDialog = isBoss || hasUserPermission("ai_dialog", permissionsStr, isBoss);
 
-    const assistantFeatures = [];
-    if (hasAiDialog) {
-        assistantFeatures.push(
-            `🤖 *F.R.I.D.A.Y. Tactical Assistant*`,
-            `• \`/search <query>\` — Live Google Search grounding (weather, crypto, news, scores)`
-        );
-        if (isBoss) {
-            assistantFeatures.push(`• \`/users\` — Dynamic user access matrix & guest approval (Boss only)`);
-        }
-        assistantFeatures.push(
-            `• \`/remember <fact>\` — Teach Friday personal preferences & habits`,
-            `• \`/memory\` — Inspect Friday's long-term memory matrix`,
-            `• \`/reset\` — Clear active multi-turn conversation context`,
-            `• *Two-Way Voice:* Send a voice note, Friday speaks back!`,
-            `• *Vision & Error Debugger:* Send code screenshots or error photos`,
-            `• \`/ask <question>\` — e.g. _"Friday, can I afford a $60 dinner?"_`
-        );
-    }
-
     const sections = [
-        `💡 *Help & Shortcuts Guide*`,
+        `💡 *Help & Commands*`,
         ``
     ];
 
-    const fastShortcuts = [];
+    const quickEntries = [];
     if (hasFinance) {
-        fastShortcuts.push(
-            `• *Expense:* \`5 coffee\` or \`12000 lunch\` or \`3.50 grab\``,
-            `• *Income:* \`+500 salary\`, \`40$ income\`, or \`earned $50 freelance\``
+        quickEntries.push(
+            `• *Expense:* \`5 coffee\` or \`12000 lunch\``,
+            `• *Income:* \`+500 salary\` or \`40$ freelance\``,
+            `• *Loan:* \`bob borrow 25$\` or \`lent 20$ to Dara\``
         );
     }
     if (hasTasks) {
-        fastShortcuts.push(`• *Work Task:* \`done Fixed payment timeout bug\``);
+        quickEntries.push(`• *Task:* \`done Fixed login bug\``);
     }
     if (hasReminders) {
-        fastShortcuts.push(`• *Reminder:* \`remind 17:30 Daily sync\` or \`remind in 25m Review PR\``);
+        quickEntries.push(`• *Reminder:* \`remind 17:30 Sync\` or \`remind in 25m PR\``);
     }
     if (hasFinance || hasTasks) {
-        fastShortcuts.push(`• *Undo Mistake:* \`/undo\` or type \`undo\` to remove the last entry`);
+        quickEntries.push(`• *Undo:* \`/undo\` or \`undo\``);
     }
 
-    if (fastShortcuts.length > 0) {
+    if (quickEntries.length > 0) {
         sections.push(
-            `⚡ *Fast Natural Logging (No Commands Needed)*`,
-            ...fastShortcuts,
-            ``
-        );
-    }
-
-    if (hasAiDialog || hasFinance) {
-        const voiceAndScan = [];
-        if (hasAiDialog) voiceAndScan.push(`• *Voice Note:* Hold 🎙️ and speak in English or Khmer (*អក្សរខ្មែរ*)`);
-        if (hasFinance) voiceAndScan.push(`• *Receipt OCR:* Send ABA Bank, Bakong, KHQR, or receipt photos`);
-        sections.push(
-            `🎙️ *Hands-Free Voice & Slip Scanner*`,
-            ...voiceAndScan,
-            ``
-        );
-    }
-
-    if (hasTasks) {
-        sections.push(
-            `💼 *Work & Task Logging*`,
-            `• \`done <task>\` — Log completed task (e.g. \`done Fixed login issue\`)`,
-            `• \`/tasks\` — View today's completed accomplishments`,
+            `⚡ *Quick Logging*`,
+            ...quickEntries,
             ``
         );
     }
@@ -407,19 +369,53 @@ export async function sendHelpMessage(env, chatId, messageId = null, userId = nu
         sections.push(
             `💳 *Finance & Cashflow*`,
             `• \`/today\` — Today's transactions & balance`,
-            `• \`/summary\` — Monthly spending breakdown & analytics`,
-            `• \`/rate\` — NBC daily official exchange rate (USD ⇄ KHR)`,
-            `• \`/settings\` — Currency toggle (USD / KHR) & monthly budget`,
+            `• \`/summary\` — Monthly spending breakdown`,
+            `• \`/lend <amt> <person>\` — Log loan`,
+            `• \`/debts\` — Active loans & settlement`,
+            `• \`/export\` — Export ledger to CSV`,
+            `• \`/rate\` — NBC official exchange rate (USD ⇄ KHR)`,
+            `• \`/settings\` — Currency toggle & monthly budget`,
             ``
         );
     }
 
-    if (assistantFeatures.length > 0) {
-        sections.push(...assistantFeatures, ``);
+    if (hasTasks) {
+        sections.push(
+            `💼 *Work & Tasks*`,
+            `• \`done <task>\` — Record completed accomplishment`,
+            `• \`/tasks\` — Today's accomplishments`,
+            `• \`/standup\` — Scrum standup report`,
+            ``
+        );
     }
 
-    sections.push(`_Tap any button below to jump directly to that workspace:_`);
-    const text = sections.join("\n");
+    if (hasReminders) {
+        sections.push(
+            `⏰ *Reminders*`,
+            `• \`/reminders\` — View & manage scheduled alerts`,
+            `• \`remind in <time> <task>\` — Quick timer alert`,
+            ``
+        );
+    }
+
+    if (hasAiDialog) {
+        const aiList = [
+            `• \`/search <query>\` — Live Google Search grounding`,
+            `• \`/think <query>\` — Deep reasoning engine`,
+            `• \`/voice on|off\` — Toggle spoken voice replies`,
+            `• \`/reset\` — Clear chat context`
+        ];
+        if (isBoss) {
+            aiList.push(`• \`/users\` — Dynamic user access matrix & permissions (Boss only)`);
+        }
+        sections.push(
+            `🤖 *AI Assistant*`,
+            ...aiList,
+            ``
+        );
+    }
+
+    const text = sections.join("\n").trim();
 
     const helpButtons = [];
     const row1 = [];

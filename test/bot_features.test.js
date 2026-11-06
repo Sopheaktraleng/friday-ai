@@ -1553,9 +1553,9 @@ describe("Bot Improvements & Stability", () => {
             expect(keyboard[0][0].callback_data).toBe("view_transactions");
             expect(keyboard[0][1].callback_data).toBe("summary_month");
 
-            // Row 2: All History & Export CSV
-            expect(keyboard[1][0].callback_data).toBe("view_history");
-            expect(keyboard[1][1].callback_data).toBe("export_csv");
+            // Row 2: Debts & All History (clean 2x2 grid)
+            expect(keyboard[1][0].callback_data).toBe("view_debts");
+            expect(keyboard[1][1].callback_data).toBe("view_history");
 
             // Row 3: Back to Main Hub
             expect(keyboard[2][0].callback_data).toBe("hub");

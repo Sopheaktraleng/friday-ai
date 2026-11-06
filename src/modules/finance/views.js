@@ -38,8 +38,8 @@ export async function sendFinanceHub(env, chatId, userId, messageId = null) {
                     { text: "📊 Month Insights", callback_data: "summary_month" }
                 ],
                 [
-                    { text: "📜 All History", callback_data: "view_history" },
-                    { text: "📥 Export CSV", callback_data: "export_csv" }
+                    { text: "🤝 Debts", callback_data: "view_debts" },
+                    { text: "📜 All History", callback_data: "view_history" }
                 ],
                 [
                     { text: "‹ Main Hub", callback_data: "hub" }
@@ -603,8 +603,8 @@ export async function getHistoryMessageData(db, userId, page = 1) {
         { text: "📊 Month Insights", callback_data: "summary_month" }
     ]);
     inlineKeyboard.push([
-        { text: "‹ Back to Finance", callback_data: "finance_hub" },
-        { text: "🏠 Main Hub", callback_data: "hub" }
+        { text: "📥 Export CSV", callback_data: "export_csv" },
+        { text: "‹ Finance", callback_data: "finance_hub" }
     ]);
 
     return {

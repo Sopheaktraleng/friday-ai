@@ -50,6 +50,12 @@ import {
     sendScanHelp
 } from "../modules/finance/scanner.js";
 import {
+    handleLendCommand,
+    sendDebtsDashboard,
+    parseNaturalLend,
+    recordLoanAndSendCard
+} from "../modules/finance/debts.js";
+import {
     handleAddWorkLogCommand,
     handleListTodayTasksCommand,
     handleListTasksHistoryCommand,
@@ -892,6 +898,25 @@ export async function handleMessage(message, env, origin) {
         return;
     }
 
+    // Lending & IOU tracking (/lend, /debts)
+    if (text === "/lend" || text.startsWith("/lend ")) {
+        if (!checkFeature("Finance", "finance")) {
+            await sendFeatureRestricted(env, chatId, "Lending & IOU Tracker", message.from);
+            return;
+        }
+        await handleLendCommand(env, chatId, userId, text);
+        return;
+    }
+
+    if (text === "/debts" || text === "/debt" || text === "/iou" || text === "/ious" || text === "/loans") {
+        if (!checkFeature("Finance", "finance")) {
+            await sendFeatureRestricted(env, chatId, "Lending & IOU Tracker", message.from);
+            return;
+        }
+        await sendDebtsDashboard(env, chatId, userId);
+        return;
+    }
+
     if (text === "/settings") {
         await sendSettingsMenu(env, chatId, userId);
         return;
@@ -1248,6 +1273,17 @@ export async function handleMessage(message, env, origin) {
                 null,
                 { merchant: incData.source, note: incData.note, txId }
             );
+            return;
+        }
+
+        // Natural lending & IOU logging: e.g. "bob borrow from me 25$ at 1st nov", "lent 20$ to dara"
+        const lendData = parseNaturalLend(text);
+        if (lendData) {
+            if (!checkFeature("Finance", "finance")) {
+                await sendFeatureRestricted(env, chatId, "Lending & IOU Tracker", message.from);
+                return;
+            }
+            await recordLoanAndSendCard(env, chatId, userId, lendData);
             return;
         }
 

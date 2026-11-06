@@ -66,6 +66,7 @@ export function getCategoryIcon(category, type = "expense") {
     if (cat.includes("gift")) return "🎁";
     if (cat.includes("invest") || cat.includes("stock") || cat.includes("crypto") || cat.includes("dividend")) return "📈";
     if (cat.includes("bonus")) return "💰";
+    if (cat.includes("loan") || cat.includes("debt") || cat.includes("lend") || cat.includes("borrow")) return "🤝";
     return type === "income" ? "💵" : "💸";
 }
 

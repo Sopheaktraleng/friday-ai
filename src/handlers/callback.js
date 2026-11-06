@@ -9,6 +9,9 @@ import {
     getTotalExpenses,
     addExpenseRecord,
     deleteExpenseById,
+    getDebtById,
+    settleDebt,
+    deleteDebt,
     clearToday,
     clearAllExpenses,
     getUserMemories,
@@ -56,6 +59,11 @@ import {
     handleExportLedgerCommand,
     sendExchangeRateCard
 } from "../modules/finance/commands.js";
+import {
+    sendDebtsDashboard,
+    formatDebtMoney,
+    formatDebtDisplayDate
+} from "../modules/finance/debts.js";
 import {
     sendScanHelp,
     handleScanConfirm,
@@ -136,6 +144,8 @@ export async function handleCallback(callback, env, origin) {
     data.startsWith("set_cur_") || 
     data.startsWith("wl_") ||
     data.startsWith("undo_tx:") ||
+    data.startsWith("settle_debt:") ||
+    data.startsWith("del_debt:") ||
     data.startsWith("relog_");
 
     if (!hasCustomToast) {
@@ -663,6 +673,118 @@ export async function handleCallback(callback, env, origin) {
         } else {
             await answerCallback(env, callback.id, { text: "⚠️ Transaction already deleted or not found." });
         }
+        return;
+    }
+
+    // Debts & Loans Callbacks
+    if (data === "view_debts") {
+        await answerCallback(env, callback.id);
+        await sendDebtsDashboard(env, chatId, userId, messageId);
+        return;
+    }
+
+    if (data.startsWith("settle_debt:")) {
+        const debtId = parseInt(data.replace("settle_debt:", ""), 10);
+        if (!Number.isFinite(debtId) || debtId <= 0) {
+            await answerCallback(env, callback.id, { text: "⚠️ Invalid debt ID.", show_alert: true });
+            return;
+        }
+
+        const debt = await getDebtById(env.DB, userId, debtId);
+        if (!debt || debt.status !== "unpaid") {
+            await answerCallback(env, callback.id, { text: "⚠️ Already settled or not found.", show_alert: true });
+            return;
+        }
+
+        // 1. Log repayment inflow into ledger (restores balance immediately)
+        const repayNote = debt.note ? `Repaid: ${debt.note}` : `Repaid by ${debt.person_name}`;
+        const repayTxId = await addExpenseRecord(
+            env.DB,
+            userId,
+            debt.amount,
+            "Loan Repayment",
+            "income",
+            debt.currency,
+            today(),
+            debt.person_name,
+            repayNote
+        );
+
+        if (!repayTxId) {
+            await answerCallback(env, callback.id, { text: "⚠️ Failed to record repayment in ledger.", show_alert: true });
+            return;
+        }
+
+        // 2. Mark debt settled in debts table linked to repayment ID
+        const settled = await settleDebt(env.DB, userId, debtId, repayTxId);
+        if (!settled) {
+            await deleteExpenseById(env.DB, userId, repayTxId);
+            await answerCallback(env, callback.id, { text: "⚠️ Already settled or not found.", show_alert: true });
+            return;
+        }
+
+        const amtStr = formatDebtMoney(settled.amount, settled.currency);
+        await answerCallback(env, callback.id, { text: `✅ ${settled.person_name} • Settled ${amtStr}` });
+
+        const lines = [
+            `🤝 *Loan Settled*`,
+            ``,
+            `• *Person:*  *${cleanMd(settled.person_name)}*`,
+            `• *Amount:*  \`${amtStr}\``
+        ];
+        if (settled.note) {
+            lines.push(`• *Note:*    _${cleanMd(settled.note)}_`);
+        }
+        lines.push(
+            `• *Date:*    \`${formatDebtDisplayDate(settled.date)}\``,
+            `• *Status:*  ✅ *Settled*`
+        );
+
+        await safeEditOrSendMessage(env, chatId, messageId, lines.join("\n"), {
+            parse_mode: "Markdown",
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: "🤝 Debts", callback_data: "view_debts" },
+                        { text: "‹ Finance", callback_data: "finance_hub" }
+                    ]
+                ]
+            }
+        });
+        return;
+    }
+
+    if (data.startsWith("del_debt:")) {
+        const debtId = parseInt(data.replace("del_debt:", ""), 10);
+        if (!Number.isFinite(debtId) || debtId <= 0) {
+            await answerCallback(env, callback.id, { text: "⚠️ Invalid debt ID.", show_alert: true });
+            return;
+        }
+
+        const deleted = await deleteDebt(env.DB, userId, debtId);
+        if (!deleted) {
+            await answerCallback(env, callback.id, { text: "⚠️ Already deleted or not found.", show_alert: true });
+            return;
+        }
+
+        await answerCallback(env, callback.id, { text: "🗑️ Loan removed" });
+        await safeEditOrSendMessage(
+            env,
+            chatId,
+            messageId,
+            `🗑️ *Loan Cancelled*\n\nRecord removed.`,
+            {
+                parse_mode: "Markdown",
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            { text: "🤝 Debts", callback_data: "view_debts" },
+                            { text: "‹ Finance", callback_data: "finance_hub" }
+                        ]
+                    ]
+                }
+            }
+        );
         return;
     }
 

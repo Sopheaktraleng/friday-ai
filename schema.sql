@@ -260,3 +260,23 @@ CREATE TABLE IF NOT EXISTS system_config (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 11. DEBTS & LENDING TRACKER (IOUs)
+CREATE TABLE IF NOT EXISTS debts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    person_name TEXT NOT NULL,
+    amount REAL NOT NULL CHECK (amount > 0),
+    currency TEXT NOT NULL DEFAULT 'USD' CHECK (currency IN ('USD', 'KHR')),
+    note TEXT,
+    date TEXT NOT NULL DEFAULT (DATE('now')),
+    status TEXT NOT NULL DEFAULT 'unpaid' CHECK (status IN ('unpaid', 'settled')),
+    settled_at TEXT,
+    expense_id INTEGER,
+    repayment_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES authorized_users(user_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_debts_user_status ON debts (user_id, status);
+
+

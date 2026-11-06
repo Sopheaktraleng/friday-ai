@@ -1,4 +1,5 @@
 import { TIME_ZONE } from "../config/constants.js";
+export { TIME_ZONE };
 
 export function today() {
     return new Intl.DateTimeFormat("en-CA", {

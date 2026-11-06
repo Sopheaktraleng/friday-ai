@@ -1103,4 +1103,144 @@ export async function importPendingStatementTransactions(db, id, userId) {
     }
 }
 
+/**
+ * Inserts a new loan / debt record (someone owes user money).
+ */
+export async function addDebt(db, userId, personName, amount, currency = "USD", note = "", date = null, expenseId = null) {
+    if (!db || !userId || !personName) return null;
+    const numAmount = parseFloat(amount);
+    if (!Number.isFinite(numAmount) || numAmount <= 0) return null;
+
+    const cleanCurrency = String(currency || "USD").toUpperCase() === "KHR" ? "KHR" : "USD";
+    const cleanPerson = String(personName).trim();
+    const cleanNote = note ? String(note).trim() : null;
+    const recordDate = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : today();
+    const expId = expenseId ? parseInt(expenseId, 10) : null;
+
+    try {
+        const res = await db.prepare(
+            `INSERT INTO debts (user_id, person_name, amount, currency, note, date, expense_id, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'unpaid')`
+        ).bind(String(userId), cleanPerson, numAmount, cleanCurrency, cleanNote, recordDate, expId).run();
+
+        const insertId = res?.meta?.last_row_id || res?.meta?.changes;
+        if (!insertId) return null;
+
+        return {
+            id: insertId,
+            user_id: String(userId),
+            person_name: cleanPerson,
+            amount: numAmount,
+            currency: cleanCurrency,
+            note: cleanNote,
+            date: recordDate,
+            expense_id: expId,
+            status: "unpaid"
+        };
+    } catch (e) {
+        console.error("addDebt error:", e);
+        return null;
+    }
+}
+
+/**
+ * Retrieves a single debt by ID and user ownership.
+ */
+export async function getDebtById(db, userId, debtId) {
+    if (!db || !userId || !debtId) return null;
+    const id = parseInt(debtId, 10);
+    if (!Number.isFinite(id) || id <= 0) return null;
+
+    try {
+        return await db.prepare(
+            `SELECT id, user_id, person_name, amount, currency, note, COALESCE(date, DATE(created_at)) AS date, expense_id, repayment_id, status, settled_at, created_at
+             FROM debts
+             WHERE id = ? AND user_id = ?`
+        ).bind(id, String(userId)).first();
+    } catch (e) {
+        console.error("getDebtById error:", e);
+        return null;
+    }
+}
+
+/**
+ * Returns all active unpaid loans owed to the user.
+ */
+export async function getPendingDebts(db, userId) {
+    if (!db || !userId) return [];
+    try {
+        const rows = await db.prepare(
+            `SELECT id, user_id, person_name, amount, currency, note, COALESCE(date, DATE(created_at)) AS date, expense_id, repayment_id, status, created_at
+             FROM debts
+             WHERE user_id = ? AND status = 'unpaid'
+             ORDER BY COALESCE(date, DATE(created_at)) DESC, id DESC`
+        ).bind(String(userId)).all();
+        return rows?.results || [];
+    } catch (e) {
+        console.error("getPendingDebts error:", e);
+        return [];
+    }
+}
+
+/**
+ * Marks an unpaid loan as settled / repaid.
+ */
+export async function settleDebt(db, userId, debtId, repaymentId = null) {
+    if (!db || !userId || !debtId) return null;
+    const id = parseInt(debtId, 10);
+    if (!Number.isFinite(id) || id <= 0) return null;
+    const repId = repaymentId ? parseInt(repaymentId, 10) : null;
+
+    try {
+        const res = await db.prepare(
+            `UPDATE debts
+             SET status = 'settled', settled_at = CURRENT_TIMESTAMP, repayment_id = ?
+             WHERE id = ? AND user_id = ? AND status = 'unpaid'`
+        ).bind(repId, id, String(userId)).run();
+
+        const changes = res?.meta?.changes ?? 0;
+        if (changes === 0) return null;
+
+        return await getDebtById(db, userId, id);
+    } catch (e) {
+        console.error("settleDebt error:", e);
+        return null;
+    }
+}
+
+/**
+ * Deletes / cancels a debt record and reverses the cashflow entry.
+ */
+export async function deleteDebt(db, userId, debtId) {
+    if (!db || !userId || !debtId) return false;
+    const id = parseInt(debtId, 10);
+    if (!Number.isFinite(id) || id <= 0) return false;
+
+    try {
+        const existing = await getDebtById(db, userId, id);
+        if (!existing) return false;
+
+        const res = await db.prepare(
+            "DELETE FROM debts WHERE id = ? AND user_id = ?"
+        ).bind(id, String(userId)).run();
+
+        const changes = res?.meta?.changes ?? 0;
+        if (changes > 0) {
+            // Reverses linked cashflow entries only after debt row is successfully removed
+            if (existing.expense_id) {
+                await deleteExpenseById(db, userId, existing.expense_id);
+            }
+            if (existing.repayment_id) {
+                await deleteExpenseById(db, userId, existing.repayment_id);
+            }
+            return true;
+        }
+        return false;
+    } catch (e) {
+        console.error("deleteDebt error:", e);
+        return false;
+    }
+}
+
+
 

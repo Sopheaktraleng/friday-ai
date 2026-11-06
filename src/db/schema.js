@@ -120,6 +120,21 @@ const TABLE_SCHEMAS = [
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );`,
+    `CREATE TABLE IF NOT EXISTS debts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        person_name TEXT NOT NULL,
+        amount REAL NOT NULL CHECK (amount > 0),
+        currency TEXT NOT NULL DEFAULT 'USD' CHECK (currency IN ('USD', 'KHR')),
+        note TEXT,
+        date TEXT NOT NULL DEFAULT (DATE('now')),
+        status TEXT NOT NULL DEFAULT 'unpaid' CHECK (status IN ('unpaid', 'settled')),
+        settled_at TEXT,
+        expense_id INTEGER,
+        repayment_id INTEGER,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES authorized_users(user_id) ON DELETE CASCADE
     );`
 ];
 
@@ -142,6 +157,9 @@ export async function ensureTables(db) {
         // Schema migrations & missing columns
         const alters = [
             "ALTER TABLE reminders ADD COLUMN target_date TEXT",
+            "ALTER TABLE debts ADD COLUMN date TEXT",
+            "ALTER TABLE debts ADD COLUMN expense_id INTEGER",
+            "ALTER TABLE debts ADD COLUMN repayment_id INTEGER",
             "ALTER TABLE user_settings ADD COLUMN briefing_mode TEXT DEFAULT 'on'",
             "ALTER TABLE expenses ADD COLUMN merchant TEXT",
             "ALTER TABLE expenses ADD COLUMN note TEXT",
@@ -158,7 +176,8 @@ export async function ensureTables(db) {
             "CREATE INDEX IF NOT EXISTS idx_chat_history_created ON chat_history (created_at)",
             "CREATE INDEX IF NOT EXISTS idx_broadcast_logs_date ON daily_broadcast_logs (date)",
             "CREATE INDEX IF NOT EXISTS idx_reminders_cleanup ON reminders (is_active, created_at)",
-            "CREATE INDEX IF NOT EXISTS idx_authorized_users_status ON authorized_users (status)"
+            "CREATE INDEX IF NOT EXISTS idx_authorized_users_status ON authorized_users (status)",
+            "CREATE INDEX IF NOT EXISTS idx_debts_user_status ON debts (user_id, status)"
         ];
 
         for (const alterSql of alters) {
