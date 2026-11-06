@@ -6,6 +6,8 @@ import {
 } from "../src/services/ai.js";
 import {
     isConversationalOrCorrection,
+    isRealTimeSearchQuery,
+    contextualizeQuery,
     parseNaturalIncome,
     parseNaturalExpense
 } from "../src/utils/natural.js";
@@ -170,6 +172,17 @@ describe("Natural Language Command Parsers", () => {
             expect(isConversationalOrCorrection("set budget to 300$")).toBe(true);
         });
 
+        it("should detect follow-ups with temporal phrases and elliptical continuations", () => {
+            expect(isConversationalOrCorrection("in 2026")).toBe(true);
+            expect(isConversationalOrCorrection("for 2025")).toBe(true);
+            expect(isConversationalOrCorrection("what about in 2026")).toBe(true);
+            expect(isConversationalOrCorrection("and what about Cambodia")).toBe(true);
+            expect(isConversationalOrCorrection("how about France")).toBe(true);
+            expect(isConversationalOrCorrection("who is the host")).toBe(true);
+            expect(isConversationalOrCorrection("which country is the host?")).toBe(true);
+            expect(isConversationalOrCorrection("ប្រជុំហ្វ្រង់កូហ្វូនី 2026, which country is the host?")).toBe(true);
+        });
+
         it("should return false for pure expense entries", () => {
             expect(isConversationalOrCorrection("5 coffee")).toBe(false);
             expect(isConversationalOrCorrection("$12 lunch")).toBe(false);
@@ -326,6 +339,54 @@ describe("Natural Language Command Parsers", () => {
         it("should reject conversational questions and advice queries", () => {
             expect(parseNaturalExpense("can I afford a 45$ mechanical keyboard?")).toBeNull();
             expect(parseNaturalExpense("how much did I spend?")).toBeNull();
+        });
+
+        it("CRITICAL: should NEVER parse prepositions with calendar years as expenses (e.g., 'in 2026')", () => {
+            expect(parseNaturalExpense("in 2026")).toBeNull();
+            expect(parseNaturalExpense("for 2025")).toBeNull();
+            expect(parseNaturalExpense("during 2024")).toBeNull();
+            expect(parseNaturalExpense("at 2026")).toBeNull();
+            expect(parseNaturalExpense("by 2026")).toBeNull();
+            expect(parseNaturalExpense("about 2026")).toBeNull();
+            expect(parseNaturalExpense("since 2023")).toBeNull();
+            expect(parseNaturalExpense("until 2030")).toBeNull();
+        });
+
+        it("CRITICAL: should NEVER parse single prepositions or pronouns as expense categories", () => {
+            expect(parseNaturalExpense("to 50")).toBeNull();
+            expect(parseNaturalExpense("from 10")).toBeNull();
+            expect(parseNaturalExpense("with 5")).toBeNull();
+            expect(parseNaturalExpense("and 20")).toBeNull();
+            expect(parseNaturalExpense("what 20")).toBeNull();
+            expect(parseNaturalExpense("is 5")).toBeNull();
+            expect(parseNaturalExpense("are 10")).toBeNull();
+            expect(parseNaturalExpense("about 25")).toBeNull();
+        });
+
+        it("Clean Architecture: should reject non-financial arbitrary word-number pairs without currency (e.g., 'table 4', 'room 101')", () => {
+            expect(parseNaturalExpense("table 4")).toBeNull();
+            expect(parseNaturalExpense("room 101")).toBeNull();
+            expect(parseNaturalExpense("step 2")).toBeNull();
+            expect(parseNaturalExpense("page 5")).toBeNull();
+            expect(parseNaturalExpense("level 10")).toBeNull();
+            expect(parseNaturalExpense("chapter 3")).toBeNull();
+        });
+    });
+
+    describe("contextualizeQuery helper", () => {
+        it("should expand elliptical follow-up with previous user query topic", () => {
+            const history = [
+                { role: "user", content: "/think Francophonie, which country hosting it" },
+                { role: "model", content: "The International Organisation of La Francophonie is hosted by France..." }
+            ];
+            expect(contextualizeQuery("in 2026", history)).toBe("Francophonie, which country hosting it in 2026");
+            expect(contextualizeQuery("what about Cambodia", history)).toBe("Francophonie, which country hosting it what about Cambodia");
+        });
+
+        it("should not modify complete standalone queries", () => {
+            const history = [{ role: "user", content: "Check budget" }];
+            expect(contextualizeQuery("coffee 5", history)).toBe("coffee 5");
+            expect(contextualizeQuery("How much did I spend today?", history)).toBe("How much did I spend today?");
         });
     });
 

@@ -11,6 +11,57 @@ const INCOME_KEYWORDS = /\b(income|salary|deposit|earned|earning|received|revenu
 
 const STOP_WORDS_IN_CATEGORY = /\b(is|was|are|were|not|my|the|this|that|why|how|what|can|could|should|undo|delete|remove|clear|cancel|wrong|budget|dollar|dollars|riel|khr|usd)\b/i;
 
+export const INVALID_STANDALONE_CATEGORIES = new Set([
+    // Prepositions
+    "in", "at", "on", "for", "from", "to", "into", "onto", "by", "with", "about",
+    "above", "across", "after", "against", "along", "among", "around", "before",
+    "behind", "below", "beneath", "beside", "between", "beyond", "during", "except",
+    "inside", "near", "off", "out", "outside", "over", "past", "since", "through",
+    "throughout", "toward", "towards", "under", "underneath", "until", "up", "upon", "via",
+    "within", "without",
+    // Pronouns & Determiners
+    "i", "me", "my", "mine", "we", "us", "our", "ours", "you", "your", "yours",
+    "he", "him", "his", "she", "her", "hers", "it", "its", "they", "them", "their", "theirs",
+    "this", "that", "these", "those", "a", "an", "the", "some", "any", "each", "every",
+    "all", "both", "neither", "either", "one", "another",
+    // Conjunctions & Particles
+    "and", "or", "but", "nor", "so", "yet", "if", "then", "else", "when", "whenever",
+    "where", "wherever", "why", "how", "what", "whatever", "which", "who", "whoever",
+    "whom", "whose", "also", "too", "very", "just", "more", "most", "less", "least",
+    "no", "not", "yes", "ok", "okay",
+    // Auxiliary & Common Verbs
+    "is", "am", "are", "was", "were", "be", "been", "being", "do", "does", "did",
+    "have", "has", "had", "can", "could", "will", "would", "shall", "should", "may",
+    "might", "must", "think", "know", "mean", "see", "say", "tell", "ask"
+]);
+
+export const KNOWN_EXPENSE_TERMS = new Set([
+    // Food & Dining
+    "food", "lunch", "dinner", "breakfast", "meal", "meals", "coffee", "cafe", "drink", "drinks",
+    "tea", "milk", "boba", "snack", "snacks", "dessert", "cake", "bread", "bakery", "restaurant",
+    "pizza", "burger", "noodle", "noodles", "rice", "beer", "wine", "alcohol",
+    // Groceries & Shopping
+    "groceries", "grocery", "supermarket", "mart", "market", "shopping", "clothes", "clothing",
+    "shoes", "bag", "electronics", "gadget", "books", "stationery", "cosmetics", "skincare",
+    // Transport & Travel
+    "transport", "transportation", "taxi", "cab", "grab", "passapp", "gas", "petrol", "fuel",
+    "parking", "toll", "bus", "train", "flight", "ticket", "tickets", "hotel", "stay",
+    // Bills & Utilities
+    "bill", "bills", "rent", "water", "electricity", "power", "electric", "wifi", "internet",
+    "phone", "mobile", "topup", "utilities", "utility", "trash", "cleaning", "maintenance",
+    // Health & Personal Care
+    "health", "medicine", "pharmacy", "medical", "doctor", "clinic", "hospital", "gym",
+    "fitness", "haircut", "barber", "salon", "massage", "spa",
+    // Entertainment & Leisure
+    "entertainment", "cinema", "movie", "game", "games", "gaming", "subscription", "netflix",
+    "spotify", "youtube", "concert", "donation", "charity", "gift", "fees", "fee",
+    // Other common categories
+    "other", "expense", "expenses", "spend", "spending", "cost", "costs",
+    // Khmer Common Expense Keywords
+    "កាហ្វេ", "បាយ", "ម្ហូប", "ទឹក", "សាំង", "តាក់ស៊ី", "ឡាន", "ម៉ូតូ", "ផ្សារ",
+    "ផ្ទះ", "ភ្លើង", "អ៊ីនធឺណិត", "ខោអាវ", "ថ្នាំ", "ចាយ", "ចំណាយ"
+]);
+
 /**
  * Detects whether a message contains multiple simultaneous action intents.
  * e.g. "Hey Friday, I just paid $8.50 for lunch with Jinie, remind me at 3:30 PM to review the design file, and note down that she loves matcha lattes."
@@ -71,6 +122,26 @@ export function isConversationalOrCorrection(text) {
     if (CORRECTION_OR_NEGATION_WORDS.test(clean)) return true;
 
     if (/\b(budget|currency|switch\s+to|change\s+to|set\s+currency|set\s+budget|how\s+much|balance|report|briefing|standup|joke|quote|talk)\b/i.test(clean)) {
+        return true;
+    }
+
+    // Conversational follow-ups, continuations, or temporal queries
+    // e.g. "in 2026", "for 2025", "what about Cambodia", "and 2026", "how about in 2026"
+    if (/^(?:in|on|at|for|by|during|since|until|around|about)\s+(?:19\d{2}|20\d{2}|today|tomorrow|yesterday|next\s+year|last\s+year)\b/i.test(clean)) {
+        return true;
+    }
+
+    if (/^(?:what\s+about|how\s+about|and\s+what\s+about|and\s+in|and\s+for|and\s+how)\b/i.test(clean)) {
+        return true;
+    }
+
+    // Elliptical follow-up starting with conjunction or preposition
+    if (/^(?:and|or|so|but|then|why|how|where|who|when)\s+[a-zA-Z0-9\u1780-\u17FF]/i.test(clean)) {
+        return true;
+    }
+
+    // Khmer conversational & inquiry phrases
+    if (/(?:ប្រទេសណា|ម្ចាស់ផ្ទះ|រៀបចំ|នរណា|កាលណា|នៅឯណា|មែនទេ|ឬទេ|យ៉ាងម៉េច|ម៉េចដែរ|មានអ្វី|ជួយ|ប្រាប់|ពន្យល់)/.test(clean)) {
         return true;
     }
 
@@ -210,6 +281,12 @@ export function parseNaturalExpense(text) {
         return null;
     }
 
+    // Reject temporal preposition phrases with 4-digit calendar years
+    // e.g. "in 2026", "for 2025", "during 2024", "at 2026", "around 2026", "by 2026"
+    if (/^(?:in|on|at|for|by|during|since|until|around|about|circa)\s+(?:19\d{2}|20\d{2})\b/i.test(clean)) {
+        return null;
+    }
+
     clean = stripTargetSuffix(clean);
 
     const hasActionPrefix = /^(?:add\s+(?:an?\s+)?(?:amount|expense)|add|log|record|put|track)\s+/i.test(clean);
@@ -275,8 +352,33 @@ export function parseNaturalExpense(text) {
         return null;
     }
 
-    if (words.length === 1 && /^(is|was|are|were|the|this|that|not|for|from|to|my|our|your)$/i.test(category)) {
+    if (words.length === 1 && INVALID_STANDALONE_CATEGORIES.has(words[0].toLowerCase())) {
         return null;
+    }
+
+    if (words.every(w => INVALID_STANDALONE_CATEGORIES.has(w.toLowerCase()))) {
+        return null;
+    }
+
+    // Calendar year safeguard: if amount is 1900-2099 without explicit currency symbol ($/USD/KHR),
+    // and category is or contains an invalid stopword/preposition, reject as temporal query
+    if (amount >= 1900 && amount <= 2099 && !currencyHint) {
+        if (words.some(w => INVALID_STANDALONE_CATEGORIES.has(w.toLowerCase()))) {
+            return null;
+        }
+    }
+
+    // Clean Architecture Guard: Bare shorthand pairs without an explicit currency symbol
+    // or action prefix (e.g. "coffee 5", "5 coffee", "15000 groceries") MUST match a recognized
+    // financial expense category. Ambiguous natural language pairs (e.g. "in 2026", "table 4", "room 101", "step 2")
+    // are rejected from deterministic parsing and cleanly routed to the AI Copilot.
+    if (!currencyHint && !hasActionPrefix) {
+        const catClean = category.toLowerCase().replace(/[^a-z0-9\u1780-\u17FF\s]/g, "").trim();
+        const catWords = catClean.split(/\s+/);
+        const isKnownFinancialTerm = catWords.some(w => KNOWN_EXPENSE_TERMS.has(w));
+        if (!isKnownFinancialTerm) {
+            return null;
+        }
     }
 
     let merchant = null;
@@ -325,18 +427,34 @@ export function isRealTimeSearchQuery(text) {
         return true;
     }
 
+    // Weather & environment
     if (/\b(?:weather|temperature|forecast|rain|raining|rainy|degrees|humidity|sunny|storm|monsoon|អាកាសធាតុ|ភ្លៀង)\b/i.test(lower)) {
         return true;
     }
 
-    if (/\b(?:news|headline|headlines|what\s+happened)\b/i.test(lower)) {
+    // News & Headlines
+    if (/\b(?:news|headline|headlines|what\s+happened|breaking\s+news)\b/i.test(lower)) {
         return true;
     }
 
-    if (/\b(?:who\s+won|football\s+score|match\s+score|premier\s+league|champions\s+league|world\s+cup|arsenal|man\s+united|barcelona|real\s+madrid)\b/i.test(lower)) {
+    // World Events, Summits, Hosts, Conferences, Organizations
+    if (/\b(?:host|hosting|hosted|summit|conference|francophonie|olympics|world\s+cup|cop\d+|g20|asean|un\s+general\s+assembly|championship|tournament|winner|who\s+won|score)\b/i.test(lower)) {
+        if (!/\b(budget|my\s+expense|my\s+spend|can\s+i\s+afford)\b/i.test(lower)) {
+            return true;
+        }
+    }
+
+    // World Knowledge Questions (which country, who is the president/prime minister, etc.)
+    if (/\b(?:which\s+country|who\s+is\s+(?:the\s+)?(?:president|prime\s+minister|ceo|leader|host|winner)|when\s+is\s+(?:the\s+)?(?:next|summit|conference|election|match))\b/i.test(lower)) {
         return true;
     }
 
+    // Sports & Football Matches
+    if (/\b(?:football\s+score|match\s+score|premier\s+league|champions\s+league|world\s+cup|arsenal|man\s+united|barcelona|real\s+madrid)\b/i.test(lower)) {
+        return true;
+    }
+
+    // Cryptocurrencies & Market Assets (Live Rates)
     if (/\b(?:bitcoin|btc|crypto|ethereum|eth\s+price|solana|gold\s+price\s+today|stock\s+price)\b/i.test(lower)) {
         // Exclude internal budget questions like "my budget" or "can i afford"
         if (!/\b(budget|my\s+expense|my\s+spend|can\s+i\s+afford)\b/i.test(lower)) {
@@ -344,9 +462,46 @@ export function isRealTimeSearchQuery(text) {
         }
     }
 
+    // Cinema & Movies
     if (/\b(?:cinema|movie\s+showtimes?|movies\s+playing|legend\s+cinema|major\s+cineplex|prime\s+cineplex)\b/i.test(lower)) {
         return true;
     }
 
+    // Khmer World Knowledge & Events
+    if (/(?:ប្រជុំ|កំពូល|ហ្វ្រង់កូហ្វូនី|ប្រទេសណា|ម្ចាស់ផ្ទះ|រៀបចំ|នាយករដ្ឋមន្ត្រី|ប្រធានាធិបតី|បាល់ទាត់|ព័ត៌មាន|អាកាសធាតុ)/.test(clean)) {
+        if (!/\b(ចាយ|ចំណាយ|លុយ|កត់|ថវិកា)\b/.test(clean)) {
+            return true;
+        }
+    }
+
     return false;
+}
+
+/**
+ * Contextualizes short or elliptical queries using recent conversation turns.
+ * e.g. "in 2026" with previous user turn "Francophonie, which country hosting it" -> "Francophonie, which country hosting it in 2026"
+ */
+export function contextualizeQuery(query, chatHistory = []) {
+    if (!query || typeof query !== "string") return query || "";
+    const clean = query.trim();
+    const words = clean.split(/\s+/);
+    
+    // Elliptical follow-up check: short query (<= 5 words) or starts with continuation word
+    const isElliptical = words.length <= 5 && /^(?:in|at|on|for|by|during|about|and|or|so|but|what\s+about|how\s+about|who|where|when|why|how)\b/i.test(clean);
+    if (!isElliptical || !Array.isArray(chatHistory) || chatHistory.length === 0) {
+        return clean;
+    }
+
+    // Find the most recent user turn in history
+    for (let i = chatHistory.length - 1; i >= 0; i--) {
+        if (chatHistory[i]?.role === "user" && chatHistory[i]?.content) {
+            let prevQuery = chatHistory[i].content.replace(/^\/(?:think|reason|ask|ai|copilot|search|web)\s*/i, "").trim();
+            if (prevQuery && prevQuery.length > 3) {
+                // Remove trailing punctuation from previous query
+                prevQuery = prevQuery.replace(/[?.!]+$/, "").trim();
+                return `${prevQuery} ${clean}`;
+            }
+        }
+    }
+    return clean;
 }

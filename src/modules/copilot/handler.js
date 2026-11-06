@@ -379,6 +379,18 @@ export async function handleAiCopilotQuery(env, chatId, userId, query, from, mes
         context.chatId = chatId;
         context.isOwner = isUserOwner;
         context.userName = requesterName;
+
+        // Multi-turn continuity: if previous assistant response was Deep Thought and user continues conversation,
+        // keep isThinking active so reasoning depth is preserved across conversational follow-ups
+        if (!isThinking && Array.isArray(context.chatHistory) && context.chatHistory.length > 0) {
+            const lastAssistantMsg = [...context.chatHistory].reverse().find(m => m.role === "model" || m.role === "assistant");
+            if (lastAssistantMsg && typeof lastAssistantMsg.content === "string") {
+                if (lastAssistantMsg.content.includes("Deep Thought") || lastAssistantMsg.content.startsWith("🧠")) {
+                    isThinking = true;
+                }
+            }
+        }
+
         context.isThinking = isThinking;
         let result = null;
 

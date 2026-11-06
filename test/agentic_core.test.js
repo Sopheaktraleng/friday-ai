@@ -1066,4 +1066,98 @@ describe("Core AI & Agentic Intelligence Adjustments", () => {
             expect(alert).toContain("OVER BUDGET ALERT");
         });
     });
+
+    describe("12. Conversational Continuity & Grounded Deep Thought Safeguards", () => {
+        it("askAiCopilot should inject verified live web grounding for world event queries when TAVILY_API_KEY is present", async () => {
+            let capturedPrompt = "";
+            fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+                const urlStr = String(url);
+                if (urlStr.includes("api.tavily.com")) {
+                    return new Response(JSON.stringify({
+                        results: [
+                            {
+                                title: "Cambodia to Host 2026 Francophonie Summit",
+                                url: "https://example.com/francophonie-2026",
+                                content: "In November 2026, Cambodia will host the 20th Summit of La Francophonie in Phnom Penh and Siem Reap."
+                            }
+                        ]
+                    }), { status: 200, headers: { "Content-Type": "application/json" } });
+                }
+                if (urlStr.includes("api.groq.com")) {
+                    const body = JSON.parse(init.body);
+                    capturedPrompt = body.messages.find(m => m.role === "system")?.content || "";
+                    return new Response(JSON.stringify({
+                        choices: [{
+                            message: {
+                                content: JSON.stringify({
+                                    reply: "Cambodia is hosting the 2026 Francophonie summit in Phnom Penh and Siem Reap.",
+                                    actions: []
+                                })
+                            }
+                        }]
+                    }), { status: 200, headers: { "Content-Type": "application/json" } });
+                }
+                return new Response("{}", { status: 500 });
+            });
+
+            const env = {
+                GROQ_API_KEY: "mock_groq_key",
+                TAVILY_API_KEY: "mock_tavily_key"
+            };
+            const context = {
+                isThinking: true,
+                chatHistory: []
+            };
+
+            const result = await askAiCopilot(env, "Francophonie, which country hosting it", context);
+            expect(result).toBeDefined();
+            expect(capturedPrompt).toContain("<verified_live_web_context>");
+            expect(capturedPrompt).toContain("Cambodia to Host 2026 Francophonie Summit");
+            expect(result.reply).toContain("Cambodia");
+        });
+
+        it("askAiCopilot should contextualize short follow-up 'in 2026' with previous topic", async () => {
+            let capturedSearchQuery = "";
+            fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+                const urlStr = String(url);
+                if (urlStr.includes("api.tavily.com")) {
+                    const body = JSON.parse(init.body);
+                    capturedSearchQuery = body.query;
+                    return new Response(JSON.stringify({
+                        results: [{ title: "Francophonie 2026 Cambodia", url: "https://example.com", content: "Cambodia hosts." }]
+                    }), { status: 200, headers: { "Content-Type": "application/json" } });
+                }
+                if (urlStr.includes("api.groq.com")) {
+                    return new Response(JSON.stringify({
+                        choices: [{
+                            message: {
+                                content: JSON.stringify({
+                                    reply: "In 2026, Cambodia is hosting.",
+                                    actions: []
+                                })
+                            }
+                        }]
+                    }), { status: 200, headers: { "Content-Type": "application/json" } });
+                }
+                return new Response("{}", { status: 500 });
+            });
+
+            const env = {
+                GROQ_API_KEY: "mock_groq_key",
+                TAVILY_API_KEY: "mock_tavily_key"
+            };
+            const context = {
+                isThinking: true,
+                chatHistory: [
+                    { role: "user", content: "/think Francophonie, which country hosting it" },
+                    { role: "model", content: "🧠 *F.R.I.D.A.Y. Deep Thought*\n\nFrance." }
+                ]
+            };
+
+            const result = await askAiCopilot(env, "in 2026", context);
+            expect(result).toBeDefined();
+            expect(capturedSearchQuery).toContain("Francophonie");
+            expect(capturedSearchQuery).toContain("in 2026");
+        });
+    });
 });

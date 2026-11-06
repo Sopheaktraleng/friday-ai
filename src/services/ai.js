@@ -2,6 +2,7 @@ import { TIME_ZONE, EXCHANGE_RATE, GEMINI_MODELS, GEMINI_FAST_MODELS, GEMINI_THI
 import { today, currentTime, monthPrefix, normalizeReminderTime } from "../utils/time.js";
 import { cleanMd, normalizeCategory } from "../utils/format.js";
 import { arrayBufferToBase64 } from "../utils/crypto.js";
+import { isRealTimeSearchQuery, contextualizeQuery } from "../utils/natural.js";
 import { 
     getDisplayCurrency, 
     getFinancialSummary, 
@@ -1326,7 +1327,36 @@ export async function callOpenAiCompatibleApi({
 }
 
 export async function askAiCopilot(env, userQuery, context) {
-    const prompt = buildCopilotPrompt(userQuery, context);
+    let liveWebContext = "";
+    if (env?.TAVILY_API_KEY || env?.GEMINI_API_KEY) {
+        const contextualTarget = contextualizeQuery(userQuery, context?.chatHistory);
+        const isSearchable = isRealTimeSearchQuery(userQuery) || 
+                             isRealTimeSearchQuery(contextualTarget) || 
+                             /\b(host|hosting|hosted|summit|francophonie|olympics|world\s+cup|cop\d+|election|winner|president|prime\s+minister|which\s+country|when\s+is|where\s+is|2025|2026|2027)\b/i.test(contextualTarget) ||
+                             /[\u1780-\u17FF]/.test(userQuery);
+
+        const isInternalFinance = /\b(my\s+budget|my\s+expense|my\s+spending|how\s+much\s+did\s+i|can\s+i\s+afford|my\s+task|remind\s+me)\b/i.test(userQuery);
+
+        if (isSearchable && !isInternalFinance) {
+            try {
+                const searchResults = await searchLiveWeb(contextualTarget, 4, env);
+                if (Array.isArray(searchResults) && searchResults.length > 0) {
+                    liveWebContext = `\n<verified_live_web_context>\n=== VERIFIED REAL-TIME SEARCH GROUNDING (GROUND TRUTH FACTS) ===\n${searchResults.map((r, i) => `[Source ${i + 1}] (${r.title}) - ${r.url}\n${r.snippet}`).join("\n\n")}\n</verified_live_web_context>\n`;
+                }
+            } catch (searchErr) {
+                console.warn("Copilot web search grounding error (non-fatal):", searchErr.message);
+            }
+        }
+    }
+
+    let prompt = buildCopilotPrompt(userQuery, context);
+    if (liveWebContext) {
+        prompt += `\n${liveWebContext}\nCRITICAL FACTUAL DIRECTIVE:
+1. Ground all answers strictly in the verified facts from <verified_live_web_context>.
+2. If Boss/user asked in Khmer, reply fluently and naturally in Khmer.
+3. Be completely accurate and concise — never guess or hallucinate.\n`;
+    }
+
     const isThinkingMode = context?.isThinking === true;
 
     // Flagship reasoning engine for /think queries (Groq 120B MoE or OpenRouter)
