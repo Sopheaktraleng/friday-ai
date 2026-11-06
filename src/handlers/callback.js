@@ -14,6 +14,8 @@ import {
     clearUserMemories,
     getUserVoiceMode,
     setUserVoiceMode,
+    getUserBriefingMode,
+    setUserBriefingMode,
     getLastModelChatMessage,
     addOrUpdateAuthorizedUser,
     setAuthorizedUserStatus,
@@ -1385,6 +1387,17 @@ export async function handleCallback(callback, env, origin) {
         await setUserVoiceMode(env.DB, userId, newMode);
         await answerCallback(env, callback.id, { 
             text: newMode === "on" ? "🎙️ Auto-Voice Mode: ENABLED" : "📝 Auto-Voice Mode: DISABLED" 
+        });
+        await sendSettingsMenu(env, chatId, userId, messageId);
+        return;
+    }
+
+    if (data === "toggle_briefing_mode") {
+        const curMode = await getUserBriefingMode(env.DB, userId);
+        const newMode = curMode === "on" ? "off" : "on";
+        await setUserBriefingMode(env.DB, userId, newMode);
+        await answerCallback(env, callback.id, { 
+            text: newMode === "on" ? "🌅 Morning Greeting: ENABLED (08:00 AM)" : "🔕 Morning Greeting: DISABLED" 
         });
         await sendSettingsMenu(env, chatId, userId, messageId);
         return;

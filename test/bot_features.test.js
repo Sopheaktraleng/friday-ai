@@ -206,15 +206,15 @@ describe("Bot Improvements & Stability", () => {
             fetchSpy.mockRestore();
         });
 
-        it("should render clean symmetrical 3-row System Settings menu without redundant user access", async () => {
-            const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-                new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 })
+        it("should render clean System Settings menu with morning greeting and preference controls", async () => {
+            const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+                Promise.resolve(new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }))
             );
 
             const mockDb = {
                 prepare: vi.fn().mockReturnValue({
                     bind: vi.fn().mockReturnValue({
-                        first: vi.fn().mockResolvedValue({ display_currency: "USD", monthly_budget: 0, voice_mode: "off" })
+                        first: vi.fn().mockResolvedValue({ display_currency: "USD", monthly_budget: 0, voice_mode: "off", briefing_mode: "on" })
                     })
                 })
             };
@@ -227,16 +227,12 @@ describe("Bot Improvements & Stability", () => {
             expect(payload.text).toContain("System Settings");
 
             const keyboard = payload.reply_markup.inline_keyboard;
-            // Exactly 3 rows
-            expect(keyboard.length).toBe(3);
-            // Exactly 2 buttons per row
-            expect(keyboard[0].length).toBe(2);
-            expect(keyboard[1].length).toBe(2);
-            expect(keyboard[2].length).toBe(2);
+            expect(keyboard.length).toBe(4);
 
             const buttonTexts = keyboard.flat().map(b => b.text);
             expect(buttonTexts).toContain("💱 Currency: USD");
             expect(buttonTexts).toContain("🎙️ Voice: OFF");
+            expect(buttonTexts).toContain("🌅 Briefing: ON");
             expect(buttonTexts).toContain("🎯 Set Budget");
             expect(buttonTexts).toContain("📥 Export CSV");
             expect(buttonTexts).toContain("🗑️ Reset Data");
@@ -540,7 +536,7 @@ describe("Bot Improvements & Stability", () => {
             fetchSpy.mockRestore();
         });
 
-        it("sendDailyScheduledWakeup should never dispatch to unauthorized users", async () => {
+        it("sendDailyScheduledBriefings should never dispatch to unauthorized users", async () => {
             const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
                 new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 })
             );
@@ -565,8 +561,8 @@ describe("Bot Improvements & Stability", () => {
                 ALLOWED_USER_IDS: "849550186" // Only owner allowed
             };
 
-            const { sendDailyScheduledWakeup } = await import("../src/modules/copilot/briefing.js");
-            await sendDailyScheduledWakeup(mockEnv);
+            const { sendDailyScheduledBriefings } = await import("../src/modules/copilot/briefing.js");
+            await sendDailyScheduledBriefings(mockEnv);
 
             // The unauthorized user must have been skipped
             const telegramCalls = fetchSpy.mock.calls.filter(call => {
@@ -574,6 +570,52 @@ describe("Bot Improvements & Stability", () => {
                 return url.includes("sendMessage") || url.includes("sendVoice");
             });
             expect(telegramCalls.length).toBe(0);
+
+            fetchSpy.mockRestore();
+        });
+
+        it("handleCallback should toggle briefing mode in settings menu", async () => {
+            const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+                Promise.resolve(new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }))
+            );
+
+            let briefingState = "on";
+            const mockDb = {
+                batch: vi.fn().mockResolvedValue([]),
+                prepare: vi.fn().mockImplementation((sql) => ({
+                    bind: vi.fn().mockImplementation((...args) => ({
+                        first: vi.fn().mockImplementation(async () => {
+                            if (sql.includes("briefing_mode")) return { briefing_mode: briefingState };
+                            return null;
+                        }),
+                        run: vi.fn().mockImplementation(async () => {
+                            if (sql.includes("briefing_mode")) briefingState = args[1];
+                            return { meta: { changes: 1 } };
+                        })
+                    }))
+                }))
+            };
+
+            const mockEnv = {
+                DB: mockDb,
+                TELEGRAM_BOT_TOKEN: "mock_token",
+                ALLOWED_USER_IDS: "849550186"
+            };
+
+            const callback = {
+                id: "cb_toggle_brief",
+                from: { id: 849550186, first_name: "Boss" },
+                message: { chat: { id: 849550186 }, message_id: 101 },
+                data: "toggle_briefing_mode"
+            };
+
+            const { handleCallback } = await import("../src/handlers/callback.js");
+            await handleCallback(callback, mockEnv, "https://example.com");
+
+            expect(briefingState).toBe("off");
+            expect(fetchSpy).toHaveBeenCalled();
+            const answerCall = fetchSpy.mock.calls.find(c => typeof c[0] === "string" && c[0].includes("answerCallbackQuery"));
+            expect(answerCall).toBeDefined();
 
             fetchSpy.mockRestore();
         });

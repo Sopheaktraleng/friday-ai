@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { generateSpeechAudio, analyzeImageWithAi, buildCopilotPrompt, buildGeminiContents, extractGeminiCandidateText, askAiCopilot } from "../src/services/ai.js";
 import { sendTelegramVoice } from "../src/services/telegram.js";
-import { sendFridayTacticalBriefing, sendFridayWakeupCall, sendDailyScheduledWakeup, getHumanWakeupFallback } from "../src/modules/copilot/briefing.js";
+import { sendFridayTacticalBriefing, sendDailyScheduledBriefings } from "../src/modules/copilot/briefing.js";
 import { handleMessage, handleUndoLastTransaction } from "../src/handlers/message.js";
 import { buildSmartLocalFallback } from "../src/modules/copilot/handler.js";
 import {
@@ -267,52 +267,19 @@ describe("F.R.I.D.A.Y. Tactical Assistant Engine", () => {
             expect(payload.text).toContain("Morning Briefing: ENABLED");
         });
 
-        it("sendFridayWakeupCall should send energetic 07:50 AM wake up call with voice note", async () => {
+        it("sendFridayTacticalBriefing should deliver clean, minimalist good morning greeting", async () => {
             fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
                 Promise.resolve(new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }))
             );
 
             const mockEnv = { TELEGRAM_BOT_TOKEN: "mock_token" };
-            await sendFridayWakeupCall(mockEnv, 123456, "user_boss");
+            await sendFridayTacticalBriefing(mockEnv, 123456, "849550186", { withVoice: true });
 
             expect(fetchSpy).toHaveBeenCalled();
             const textCall = fetchSpy.mock.calls.find(c => {
                 try {
                     const body = JSON.parse(c[1]?.body);
-                    return body.text && body.text.includes("Wake Up, Boss");
-                } catch (e) {
-                    return false;
-                }
-            });
-            expect(textCall).toBeDefined();
-            const parsed = JSON.parse(textCall[1].body);
-            expect(parsed.reply_markup.inline_keyboard[0][0].text).toContain("I'm Awake");
-        });
-
-        it("sendFridayWakeupCall should generate smart AI-driven message when Gemini API is available", async () => {
-            const aiReply = "⏰ *Wake Up, Boss!*\n\nMorning Boss! Grab some water, stretch, and let's conquer today.";
-            const aiVoice = "Good morning Boss. It is 7:50 AM. Drink some water and ease out of bed.";
-
-            fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((url) => {
-                if (typeof url === "string" && url.includes("generativelanguage.googleapis.com")) {
-                    return Promise.resolve(new Response(JSON.stringify({
-                        candidates: [{
-                            content: {
-                                parts: [{ text: JSON.stringify({ reply: aiReply, voice_summary: aiVoice }) }]
-                            }
-                        }]
-                    }), { status: 200 }));
-                }
-                return Promise.resolve(new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }));
-            });
-
-            const mockEnv = { TELEGRAM_BOT_TOKEN: "mock_token", GEMINI_API_KEY: "mock_gemini_key" };
-            await sendFridayWakeupCall(mockEnv, 123456, "user_boss");
-
-            const textCall = fetchSpy.mock.calls.find(c => {
-                try {
-                    const body = JSON.parse(c[1]?.body);
-                    return body.text && body.text.includes("conquer today");
+                    return body.text && body.text.includes("Good morning");
                 } catch (e) {
                     return false;
                 }
@@ -358,7 +325,7 @@ describe("F.R.I.D.A.Y. Tactical Assistant Engine", () => {
             expect(claimNextDay).toBe(true);
         });
 
-        it("sendDailyScheduledWakeup should skip users if wake-up call was already claimed today", async () => {
+        it("sendDailyScheduledBriefings should skip users if briefing was already claimed today", async () => {
             fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
                 Promise.resolve(new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }))
             );
@@ -370,7 +337,7 @@ describe("F.R.I.D.A.Y. Tactical Assistant Engine", () => {
                     bind: vi.fn().mockImplementation((...args) => ({
                         all: vi.fn().mockImplementation(async () => {
                             if (sql.includes("SELECT DISTINCT user_id")) {
-                                return { results: [{ user_id: "user_boss" }] };
+                                return { results: [{ user_id: "849550186" }] };
                             }
                             return { results: [] };
                         }),
@@ -395,34 +362,17 @@ describe("F.R.I.D.A.Y. Tactical Assistant Engine", () => {
                 }))
             };
 
-            const mockEnv = { DB: mockDb, TELEGRAM_BOT_TOKEN: "mock_token" };
+            const mockEnv = { DB: mockDb, TELEGRAM_BOT_TOKEN: "mock_token", ALLOWED_USER_IDS: "849550186" };
 
             // Run 1: Should send message
-            await sendDailyScheduledWakeup(mockEnv);
+            await sendDailyScheduledBriefings(mockEnv);
             const callCountAfterRun1 = fetchSpy.mock.calls.length;
             expect(callCountAfterRun1).toBeGreaterThan(0);
 
             // Run 2: Duplicate invocation (simulating Cloudflare double cron trigger) -> MUST skip!
-            await sendDailyScheduledWakeup(mockEnv);
+            await sendDailyScheduledBriefings(mockEnv);
             const callCountAfterRun2 = fetchSpy.mock.calls.length;
             expect(callCountAfterRun2).toBe(callCountAfterRun1); // No new fetch calls made!
-        });
-
-        it("getHumanWakeupFallback should provide thoughtful day-specific human messages", () => {
-            const monday = getHumanWakeupFallback("Monday", {});
-            expect(monday.reply).toContain("Wake Up, Boss!");
-            expect(monday.reply).toContain("Monday");
-            expect(monday.reply).toContain("water");
-            expect(monday.voice_summary).toContain("Monday");
-
-            const friday = getHumanWakeupFallback("Friday", {});
-            expect(friday.reply).toContain("Wake Up, Boss!");
-            expect(friday.reply).toContain("Friday");
-            expect(friday.voice_summary).toContain("Friday");
-
-            const weekend = getHumanWakeupFallback("Sunday", {});
-            expect(weekend.reply).toContain("Wake Up, Boss!");
-            expect(weekend.reply).toContain("Sunday");
         });
     });
 

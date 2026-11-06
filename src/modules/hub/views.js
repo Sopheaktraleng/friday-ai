@@ -1,6 +1,6 @@
 import { TIME_ZONE, isOwner, OWNER_USER_ID, hasUserPermission, formatUserPermissionsSummary, DEFAULT_GUEST_PERMISSIONS } from "../../config/constants.js";
 import { ensureTables } from "../../db/schema.js";
-import { getDisplayCurrency, getFinancialSummary, getUserVoiceMode, listAuthorizedUsers, getAuthorizedUser } from "../../db/queries.js";
+import { getDisplayCurrency, getFinancialSummary, getUserVoiceMode, getUserBriefingMode, listAuthorizedUsers, getAuthorizedUser } from "../../db/queries.js";
 import { monthPrefix, monthLabel } from "../../utils/time.js";
 import { formatAmount, cleanMd } from "../../utils/format.js";
 import { safeEditOrSendMessage } from "../../services/telegram.js";
@@ -143,6 +143,7 @@ export async function sendMainMenu(env, chatId, userId, from, origin, messageId 
 export async function sendSettingsMenu(env, chatId, userId, messageId = null) {
     const displayCurrency = await getDisplayCurrency(env.DB, userId);
     const voiceMode = await getUserVoiceMode(env.DB, userId);
+    const briefingMode = await getUserBriefingMode(env.DB, userId);
     const settingsRow = await env.DB.prepare(
         "SELECT monthly_budget FROM user_settings WHERE user_id = ?"
     ).bind(userId).first();
@@ -151,6 +152,7 @@ export async function sendSettingsMenu(env, chatId, userId, messageId = null) {
     const budgetStr = budgetKhr > 0 ? formatAmount(budgetKhr, displayCurrency) : "Off (No limit)";
     const currencyPill = displayCurrency === "USD" ? "💱 Currency: USD" : "💱 Currency: KHR";
     const voicePill = voiceMode === "on" ? "🎙️ Voice: ON" : "🎙️ Voice: OFF";
+    const briefingPill = briefingMode === "on" ? "🌅 Briefing: ON" : "🔕 Briefing: OFF";
 
     const text = [
         `⚙️ *System Settings*`,
@@ -158,6 +160,7 @@ export async function sendSettingsMenu(env, chatId, userId, messageId = null) {
         `• *Display Currency:* \`${displayCurrency} (${displayCurrency === "USD" ? "$" : "៛"})\``,
         `• *Monthly Budget:*   \`${budgetStr}\``,
         `• *Auto-Voice Mode:*  \`${voiceMode === "on" ? "Enabled (Always Speak)" : "Disabled (Text)"}\``,
+        `• *Morning Greeting:* \`${briefingMode === "on" ? "Enabled (08:00 AM)" : "Disabled (Off)"}\``,
         ``,
         `_Tap any setting below to toggle or reconfigure:_`
     ].join("\n");
@@ -168,11 +171,14 @@ export async function sendSettingsMenu(env, chatId, userId, messageId = null) {
             { text: voicePill, callback_data: "toggle_voice_mode" }
         ],
         [
-            { text: "🎯 Set Budget", callback_data: "budget_help" },
-            { text: "📥 Export CSV", callback_data: "export_csv" }
+            { text: briefingPill, callback_data: "toggle_briefing_mode" },
+            { text: "🎯 Set Budget", callback_data: "budget_help" }
         ],
         [
-            { text: "🗑️ Reset Data", callback_data: "clear_data" },
+            { text: "📥 Export CSV", callback_data: "export_csv" },
+            { text: "🗑️ Reset Data", callback_data: "clear_data" }
+        ],
+        [
             { text: "🏠 Main Hub", callback_data: "hub" }
         ]
     ];
