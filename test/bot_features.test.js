@@ -2347,4 +2347,154 @@ describe("Bot Improvements & Stability", () => {
             fetchSpy.mockRestore();
         });
     });
+
+    describe("Duplicate Bank Slip & Receipt Detection", () => {
+        it("findRecentDuplicateExpense should match transaction by user, amount, currency, and merchant within 30 mins", async () => {
+            const { findRecentDuplicateExpense } = await import("../src/db/queries.js");
+            const tenMinsAgoIso = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+            const mockDb = {
+                prepare: vi.fn().mockImplementation((query) => ({
+                    bind: vi.fn().mockImplementation((userId, amount, currency) => ({
+                        all: vi.fn().mockResolvedValue({
+                            results: [
+                                {
+                                    id: 42,
+                                    user_id: userId,
+                                    amount: 4.5,
+                                    currency: "USD",
+                                    category: "Coffee",
+                                    type: "expense",
+                                    merchant: "Brown Coffee",
+                                    date: "2026-11-06",
+                                    created_at: tenMinsAgoIso
+                                }
+                            ]
+                        })
+                    }))
+                }))
+            };
+
+            const duplicate = await findRecentDuplicateExpense(mockDb, "849550186", {
+                amount: 4.5,
+                currency: "USD",
+                merchant: "brown coffee"
+            });
+
+            expect(duplicate).toBeDefined();
+            expect(duplicate.id).toBe(42);
+            expect(duplicate.merchant).toBe("Brown Coffee");
+            expect(duplicate.minutes_ago).toBeGreaterThanOrEqual(9);
+            expect(duplicate.minutes_ago).toBeLessThanOrEqual(11);
+        });
+
+        it("formatPendingScanText should render duplicate warning with time ago when duplicate is detected", async () => {
+            const { formatPendingScanText } = await import("../src/modules/finance/scanner.js");
+            const scan = {
+                id: 1,
+                user_id: "849550186",
+                amount: 4.5,
+                currency: "USD",
+                category: "Coffee",
+                type: "expense",
+                merchant: "Brown Coffee",
+                bank: "ABA Mobile",
+                date: "2026-11-06"
+            };
+
+            const duplicate = {
+                id: 99,
+                amount: 4.5,
+                currency: "USD",
+                merchant: "Brown Coffee",
+                minutes_ago: 5
+            };
+
+            const text = formatPendingScanText(scan, duplicate);
+            expect(text).toContain("⚠️ *Possible Duplicate Detected*");
+            expect(text).toContain("A transaction of *$4.5* at '*Brown Coffee*' was already recorded *5 minutes ago*");
+            expect(text).toContain("Are you sure you want to record this again?");
+
+            const cleanText = formatPendingScanText(scan, null);
+            expect(cleanText).not.toContain("Possible Duplicate Detected");
+            expect(cleanText).toContain("🧾 *Slip / Receipt Detected*");
+            expect(cleanText).toContain("Tap below to confirm and record:");
+        });
+
+        it("getPendingScanKeyboard should provide 'Record Anyway' and 'Discard' on duplicates", async () => {
+            const { getPendingScanKeyboard } = await import("../src/modules/finance/scanner.js");
+            const scan = { id: 10, amount: 4.5, currency: "USD", type: "expense", category: "Coffee" };
+
+            const duplicateMarkup = getPendingScanKeyboard(scan, true);
+            const duplicateButtons = duplicateMarkup.inline_keyboard.flat();
+            expect(duplicateButtons[0].text).toContain("✓ Record Anyway ($4.5)");
+            expect(duplicateButtons.some(b => b.text.includes("Discard"))).toBe(true);
+
+            const standardMarkup = getPendingScanKeyboard(scan, false);
+            const standardButtons = standardMarkup.inline_keyboard.flat();
+            expect(standardButtons[0].text).toContain("✓ Confirm ($4.5)");
+        });
+
+        it("renderPendingScanCard should check database and display duplicate warning card", async () => {
+            const { renderPendingScanCard } = await import("../src/modules/finance/scanner.js");
+            const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+                Promise.resolve(new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }))
+            );
+
+            const fiveMinsAgoIso = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+            const mockDb = {
+                prepare: vi.fn().mockImplementation((query) => ({
+                    bind: vi.fn().mockImplementation(() => ({
+                        first: vi.fn().mockResolvedValue(null),
+                        all: vi.fn().mockImplementation(async () => {
+                            if (query.includes("FROM expenses")) {
+                                return {
+                                    results: [
+                                        {
+                                            id: 77,
+                                            user_id: "849550186",
+                                            amount: 4.5,
+                                            currency: "USD",
+                                            category: "Coffee",
+                                            type: "expense",
+                                            merchant: "Brown Coffee",
+                                            created_at: fiveMinsAgoIso
+                                        }
+                                    ]
+                                };
+                            }
+                            return { results: [] };
+                        })
+                    }))
+                }))
+            };
+
+            const mockEnv = { DB: mockDb, TELEGRAM_BOT_TOKEN: "mock_token" };
+            const scan = {
+                id: 12,
+                user_id: "849550186",
+                chat_id: "849550186",
+                amount: 4.5,
+                currency: "USD",
+                category: "Coffee",
+                type: "expense",
+                merchant: "Brown Coffee",
+                bank: "ABA Mobile",
+                date: "2026-11-06"
+            };
+
+            await renderPendingScanCard(mockEnv, 849550186, scan, 202);
+
+            expect(fetchSpy).toHaveBeenCalled();
+            const editCall = fetchSpy.mock.calls.find(c => typeof c[0] === "string" && (c[0].includes("editMessageText") || c[0].includes("sendMessage")));
+            expect(editCall).toBeDefined();
+
+            const payload = JSON.parse(editCall[1].body);
+            expect(payload.text).toContain("⚠️ *Possible Duplicate Detected*");
+            expect(payload.text).toContain("Brown Coffee");
+            const buttons = payload.reply_markup.inline_keyboard.flat();
+            expect(buttons[0].text).toContain("Record Anyway");
+
+            fetchSpy.mockRestore();
+        });
+    });
 });

@@ -4,6 +4,7 @@ import { cleanMd, formatMoney, capitalize, getCategoryIcon, normalizeCategory } 
 import { arrayBufferToBase64 } from "../../utils/crypto.js";
 import { 
     addExpenseRecord, 
+    findRecentDuplicateExpense,
     savePendingStatement, 
     getPendingStatement, 
     deletePendingStatement, 
@@ -14,7 +15,7 @@ import { telegram, sendMessage, answerCallback, safeEditOrSendMessage } from "..
 import { parseReceiptImage, analyzeImageWithAi, parseStatementOrInvoicePdfWithGemini } from "../../services/ai.js";
 import { sendTransactionReceipt } from "./views.js";
 
-export function formatPendingScanText(scan) {
+export function formatPendingScanText(scan, duplicate = null) {
     const isIncome = scan.type === "income";
     const sign = isIncome ? "+" : "-";
     const symbol = scan.currency === "USD" ? "$" : "";
@@ -34,8 +35,31 @@ export function formatPendingScanText(scan) {
     const note = scan.note ? `\n📝 *Note:* ${cleanMd(scan.note)}` : "";
     const cambodiaDate = formatCambodiaDateTime(scan.date || null);
 
-    return [
-        `🧾 *Slip / Receipt Detected*`,
+    const lines = [];
+
+    if (duplicate) {
+        const dupSymbol = duplicate.currency === "USD" ? "$" : "";
+        const dupSuffix = duplicate.currency === "KHR" ? " ៛" : "";
+        const dupAmt = `${dupSymbol}${formatMoney(duplicate.amount)}${dupSuffix}`;
+        const dupMerchant = duplicate.merchant
+            ? ` at '*${cleanMd(duplicate.merchant)}*'`
+            : (scan.merchant ? ` at '*${cleanMd(scan.merchant)}*'` : "");
+        const mins = duplicate.minutes_ago || 1;
+        const timeAgo = mins <= 1 ? "1 minute ago" : `${mins} minutes ago`;
+
+        lines.push(
+            `⚠️ *Possible Duplicate Detected*`,
+            ``,
+            `A transaction of *${dupAmt}*${dupMerchant} was already recorded *${timeAgo}*.`,
+            ``,
+            `────────────────────`,
+            `🧾 *Slip Details:*`
+        );
+    } else {
+        lines.push(`🧾 *Slip / Receipt Detected*`);
+    }
+
+    lines.push(
         ``,
         `● *Bank:*        ${cleanMd(bankName)}`,
         `● *${isIncome ? "Payer" : "Merchant"}:*   ${cleanMd(merchant)}`,
@@ -43,21 +67,27 @@ export function formatPendingScanText(scan) {
         `● *Category:*    ${icon} *${capitalize(scan.category)}*`,
         `● *Date & Time:* 📅 \`${cambodiaDate.full} ICT\`${note}`,
         ``,
-        `_Tap below to confirm and record:_`
-    ].join("\n");
+        duplicate ? `_Are you sure you want to record this again?_` : `_Tap below to confirm and record:_`
+    );
+
+    return lines.join("\n");
 }
 
-export function getPendingScanKeyboard(scan) {
+export function getPendingScanKeyboard(scan, isDuplicate = false) {
     const isIncome = scan.type === "income";
     const symbol = scan.currency === "USD" ? "$" : "";
     const suffix = scan.currency === "KHR" ? " ៛" : "";
     const amtStr = `${symbol}${formatMoney(scan.amount)}${suffix}`;
 
+    const confirmText = isDuplicate
+        ? `✓ Record Anyway (${amtStr})`
+        : `✓ Confirm (${amtStr})`;
+
     return {
         inline_keyboard: [
             [
                 {
-                    text: `✓ Confirm (${amtStr})`,
+                    text: confirmText,
                     callback_data: `scan_ok:${scan.id}`
                 }
             ],
@@ -73,7 +103,7 @@ export function getPendingScanKeyboard(scan) {
             ],
             [
                 {
-                    text: "✕ Discard",
+                    text: "🗑️ Discard",
                     callback_data: `scan_del:${scan.id}`
                 }
             ]
@@ -105,8 +135,17 @@ export async function renderPendingScanCard(env, chatId, scanOrId, messageId) {
         return;
     }
 
-    const text = formatPendingScanText(scan);
-    const markup = getPendingScanKeyboard(scan);
+    // Check for recent duplicate transaction in expenses (last 30 minutes)
+    const duplicate = await findRecentDuplicateExpense(env.DB, scan.user_id, {
+        amount: scan.amount,
+        currency: scan.currency,
+        merchant: scan.merchant,
+        windowMinutes: 30
+    });
+
+    const isDuplicate = Boolean(duplicate);
+    const text = formatPendingScanText(scan, duplicate);
+    const markup = getPendingScanKeyboard(scan, isDuplicate);
 
     await safeEditOrSendMessage(env, chatId, messageId, text, {
         parse_mode: "Markdown",

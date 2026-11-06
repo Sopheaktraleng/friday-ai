@@ -289,6 +289,64 @@ export async function getRecentFavorites(db, userId, type = "expense", limit = 3
     }
 }
 
+/**
+ * Checks for a recent duplicate transaction within the specified time window (default: 30 minutes).
+ * Matches user_id, amount, currency, and optionally compares merchant name.
+ */
+export async function findRecentDuplicateExpense(db, userId, { amount, currency, merchant = null, windowMinutes = 30 }) {
+    if (!db || !userId || !amount) return null;
+    try {
+        const mins = parseInt(windowMinutes, 10) || 30;
+        const query = `
+            SELECT id, amount, currency, category, type, merchant, date, created_at
+            FROM expenses
+            WHERE user_id = ?
+              AND amount = ?
+              AND currency = ?
+              AND created_at >= datetime('now', '-${mins} minutes')
+            ORDER BY id DESC
+            LIMIT 5
+        `;
+        const res = await db.prepare(query)
+            .bind(String(userId), amount, currency)
+            .all();
+
+        const results = res?.results || [];
+        if (results.length === 0) return null;
+
+        const nowMs = Date.now();
+        const enrichMinutesAgo = (r) => {
+            let minutesAgo = 1;
+            if (r.created_at) {
+                const raw = String(r.created_at).trim();
+                const isoStr = raw.includes("T") 
+                    ? (raw.endsWith("Z") ? raw : raw + "Z")
+                    : raw.replace(" ", "T") + "Z";
+                const createdMs = new Date(isoStr).getTime();
+                if (!isNaN(createdMs)) {
+                    minutesAgo = Math.max(1, Math.round((nowMs - createdMs) / 60000));
+                }
+            }
+            return { ...r, minutes_ago: minutesAgo };
+        };
+
+        if (merchant && typeof merchant === "string" && merchant.trim()) {
+            const cleanTarget = merchant.trim().toLowerCase();
+            const matched = results.find(r => {
+                if (!r.merchant) return false;
+                const m = r.merchant.trim().toLowerCase();
+                return m === cleanTarget || m.includes(cleanTarget) || cleanTarget.includes(m);
+            });
+            if (matched) return enrichMinutesAgo(matched);
+        }
+
+        return enrichMinutesAgo(results[0]);
+    } catch (e) {
+        console.warn("findRecentDuplicateExpense error:", e.message);
+        return null;
+    }
+}
+
 export async function addExpenseRecord(db, userId, amount, category, type = "expense", currency = "KHR", customDate = null, merchant = null, note = null) {
     const recordDate = (customDate && /^\d{4}-\d{2}-\d{2}$/.test(customDate)) ? customDate : today();
     const cleanMerchant = merchant && typeof merchant === "string" ? merchant.trim() : null;
