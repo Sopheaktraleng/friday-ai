@@ -1,6 +1,6 @@
 import { TIME_ZONE, isOwner, OWNER_USER_ID, hasUserPermission, formatUserPermissionsSummary, DEFAULT_GUEST_PERMISSIONS } from "../../config/constants.js";
 import { ensureTables } from "../../db/schema.js";
-import { getDisplayCurrency, getFinancialSummary, getUserVoiceMode, getUserBriefingMode, listAuthorizedUsers, getAuthorizedUser } from "../../db/queries.js";
+import { getDisplayCurrency, getFinancialSummary, getUserVoiceMode, getUserBriefingMode, getUserSettings, listAuthorizedUsers, getAuthorizedUser } from "../../db/queries.js";
 import { monthPrefix, monthLabel } from "../../utils/time.js";
 import { formatAmount, cleanMd } from "../../utils/format.js";
 import { safeEditOrSendMessage } from "../../services/telegram.js";
@@ -141,14 +141,12 @@ export async function sendMainMenu(env, chatId, userId, from, origin, messageId 
 }
 
 export async function sendSettingsMenu(env, chatId, userId, messageId = null) {
-    const displayCurrency = await getDisplayCurrency(env.DB, userId);
-    const voiceMode = await getUserVoiceMode(env.DB, userId);
-    const briefingMode = await getUserBriefingMode(env.DB, userId);
-    const settingsRow = await env.DB.prepare(
-        "SELECT monthly_budget FROM user_settings WHERE user_id = ?"
-    ).bind(userId).first();
+    const settings = await getUserSettings(env.DB, userId);
+    const displayCurrency = settings.display_currency;
+    const voiceMode = settings.voice_mode;
+    const briefingMode = settings.briefing_mode;
+    const budgetKhr = settings.monthly_budget || 0;
 
-    const budgetKhr = settingsRow?.monthly_budget || 0;
     const budgetStr = budgetKhr > 0 ? formatAmount(budgetKhr, displayCurrency) : "Off (No limit)";
     const currencyPill = displayCurrency === "USD" ? "💱 Currency: USD" : "💱 Currency: KHR";
     const voicePill = voiceMode === "on" ? "🎙️ Voice: ON" : "🎙️ Voice: OFF";

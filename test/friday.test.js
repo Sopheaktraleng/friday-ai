@@ -374,6 +374,34 @@ describe("F.R.I.D.A.Y. Tactical Assistant Engine", () => {
             const callCountAfterRun2 = fetchSpy.mock.calls.length;
             expect(callCountAfterRun2).toBe(callCountAfterRun1); // No new fetch calls made!
         });
+
+        it("sendDailyScheduledBriefings should respect voice_mode = off and send text only without audio", async () => {
+            fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+                Promise.resolve(new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }))
+            );
+
+            const mockDb = {
+                batch: vi.fn().mockResolvedValue([]),
+                prepare: vi.fn().mockImplementation((sql) => ({
+                    bind: vi.fn().mockImplementation((...args) => ({
+                        all: vi.fn().mockResolvedValue({ results: [{ user_id: "849550186" }] }),
+                        first: vi.fn().mockImplementation(async () => {
+                            if (sql.includes("briefing_mode")) return { briefing_mode: "on" };
+                            if (sql.includes("voice_mode")) return { voice_mode: "off" };
+                            return null;
+                        }),
+                        run: vi.fn().mockResolvedValue({ meta: { changes: 1 } })
+                    }))
+                }))
+            };
+
+            const mockEnv = { DB: mockDb, TELEGRAM_BOT_TOKEN: "mock_token", ALLOWED_USER_IDS: "849550186" };
+            await sendDailyScheduledBriefings(mockEnv);
+
+            expect(fetchSpy).toHaveBeenCalled();
+            const voiceCalls = fetchSpy.mock.calls.filter(c => typeof c[0] === "string" && c[0].includes("sendVoice"));
+            expect(voiceCalls.length).toBe(0);
+        });
     });
 
     describe("F.R.I.D.A.Y. Command Routing", () => {

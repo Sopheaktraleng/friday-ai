@@ -20,6 +20,28 @@ export async function wasUpdateProcessed(db, updateId) {
     }
 }
 
+export async function getUserSettings(db, userId) {
+    try {
+        const row = await db
+            .prepare("SELECT display_currency, monthly_budget, voice_mode, briefing_mode FROM user_settings WHERE user_id = ?")
+            .bind(userId)
+            .first();
+        return {
+            display_currency: row?.display_currency || "KHR",
+            monthly_budget: row?.monthly_budget || 0,
+            voice_mode: row?.voice_mode || "off",
+            briefing_mode: row?.briefing_mode || "on"
+        };
+    } catch (e) {
+        return {
+            display_currency: "KHR",
+            monthly_budget: 0,
+            voice_mode: "off",
+            briefing_mode: "on"
+        };
+    }
+}
+
 export async function getDisplayCurrency(db, userId) {
     const row = await db
         .prepare("SELECT display_currency FROM user_settings WHERE user_id = ?")

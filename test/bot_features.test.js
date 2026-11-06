@@ -255,6 +255,29 @@ describe("Bot Improvements & Stability", () => {
             await ensureTables(mockDb);
             expect(batchSpy).toHaveBeenCalled();
         });
+
+        it("getUserSettings should fetch all settings in a single query with defaults", async () => {
+            const { getUserSettings } = await import("../src/db/queries.js");
+            const mockDb = {
+                prepare: vi.fn().mockReturnValue({
+                    bind: vi.fn().mockReturnValue({
+                        first: vi.fn().mockResolvedValue({
+                            display_currency: "USD",
+                            monthly_budget: 500,
+                            voice_mode: "on",
+                            briefing_mode: "on"
+                        })
+                    })
+                })
+            };
+
+            const settings = await getUserSettings(mockDb, "849550186");
+            expect(settings.display_currency).toBe("USD");
+            expect(settings.monthly_budget).toBe(500);
+            expect(settings.voice_mode).toBe("on");
+            expect(settings.briefing_mode).toBe("on");
+            expect(mockDb.prepare).toHaveBeenCalledTimes(1);
+        });
     });
 
     describe("Group Chat Safety & Message Routing", () => {

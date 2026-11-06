@@ -3,7 +3,7 @@ import { TIME_ZONE, GEMINI_MODELS, getAllowedUserIds, isUserAuthorized, isOwner 
 import { buildAiUserContext, parseCopilotResponse, generateSpeechAudio, extractGeminiCandidateText } from "../../services/ai.js";
 import { sendMessage, sendTelegramVoice } from "../../services/telegram.js";
 import { ensureTables } from "../../db/schema.js";
-import { getUserBriefingMode, claimDailyBroadcast } from "../../db/queries.js";
+import { getUserBriefingMode, getUserVoiceMode, claimDailyBroadcast } from "../../db/queries.js";
 
 /**
  * Resilient multi-model Gemini caller for JSON responses with automatic fallback.
@@ -170,7 +170,8 @@ export async function sendDailyScheduledBriefings(env) {
                 const canSend = await claimDailyBroadcast(env.DB, userId, "briefing", todayStr);
                 if (!canSend) continue;
 
-                await sendFridayTacticalBriefing(env, userId, userId, { withVoice: true });
+                const voiceMode = await getUserVoiceMode(env.DB, userId);
+                await sendFridayTacticalBriefing(env, userId, userId, { withVoice: voiceMode === "on" });
             } catch (err) {
                 console.error(`Failed to send daily briefing to ${userId}:`, err);
             }

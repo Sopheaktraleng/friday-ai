@@ -78,6 +78,17 @@ export async function processDueReminders(env) {
         }
 
         try {
+            // Mark last_sent_date before delivery to ensure idempotency and prevent duplicate delivery loops
+            if (r.frequency === "once" || r.target_date) {
+                await env.DB.prepare("UPDATE reminders SET is_active = 0, last_sent_date = ? WHERE id = ?")
+                    .bind(todayStr, r.id)
+                    .run();
+            } else {
+                await env.DB.prepare("UPDATE reminders SET last_sent_date = ? WHERE id = ?")
+                    .bind(todayStr, r.id)
+                    .run();
+            }
+
             if (r.type === "focus" || (r.title && (r.title.includes("Focus") || r.title.includes("Deep Work")))) {
                 await sendFocusCompletedNotification(env, r.chat_id, r.title, r.id);
             } else if (r.type === "lunchbox") {
@@ -88,16 +99,6 @@ export async function processDueReminders(env) {
                 await sendExpenseLogNotification(env, r.chat_id);
             } else {
                 await sendCustomReminderNotification(env, r.chat_id, r.title, r.reminder_time, r.id);
-            }
-
-            if (r.frequency === "once" || r.target_date) {
-                await env.DB.prepare("UPDATE reminders SET is_active = 0, last_sent_date = ? WHERE id = ?")
-                    .bind(todayStr, r.id)
-                    .run();
-            } else {
-                await env.DB.prepare("UPDATE reminders SET last_sent_date = ? WHERE id = ?")
-                    .bind(todayStr, r.id)
-                    .run();
             }
         } catch (err) {
             console.error(`Failed to send reminder ${r.id} to chat ${r.chat_id}:`, err);
