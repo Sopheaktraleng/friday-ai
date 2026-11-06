@@ -9,6 +9,7 @@ import {
     getTotalExpenses,
     addExpenseRecord,
     deleteExpenseById,
+    updateExpenseCategory,
     clearToday,
     clearAllExpenses,
     getUserMemories,
@@ -46,6 +47,7 @@ import {
     sendCategoryPicker,
     sendAmountPicker,
     sendTransactionReceipt,
+    sendTransactionCategoryPicker,
     sendTransactions,
     sendSummary,
     updateHistoryMessage
@@ -134,7 +136,10 @@ export async function handleCallback(callback, env, origin) {
     data.startsWith("remind_done:") || 
     data.startsWith("work_del_") || 
     data.startsWith("set_cur_") || 
-    data.startsWith("wl_");
+    data.startsWith("wl_") ||
+    data.startsWith("set_cat:") ||
+    data.startsWith("undo_tx:") ||
+    data.startsWith("relog_");
 
     if (!hasCustomToast) {
         await answerCallback(env, callback.id);
@@ -660,6 +665,65 @@ export async function handleCallback(callback, env, origin) {
             });
         } else {
             await answerCallback(env, callback.id, { text: "⚠️ Transaction already deleted or not found." });
+        }
+        return;
+    }
+
+    // 1-Tap Category Reassignment Callbacks
+    if (data.startsWith("edit_cat:")) {
+        const txId = parseInt(data.replace("edit_cat:", ""), 10);
+        await answerCallback(env, callback.id);
+        await sendTransactionCategoryPicker(env, chatId, userId, txId, messageId);
+        return;
+    }
+
+    if (data.startsWith("set_cat:")) {
+        const parts = data.split(":");
+        const txId = parseInt(parts[1], 10);
+        const newCategory = parts.slice(2).join(":");
+
+        const updated = await updateExpenseCategory(env.DB, userId, txId, newCategory);
+        if (!updated) {
+            await answerCallback(env, callback.id, { text: "⚠️ Transaction not found or already deleted.", show_alert: true });
+            return;
+        }
+
+        await answerCallback(env, callback.id, { text: `🏷️ Category changed to ${capitalize(updated.category)}!` });
+        await sendTransactionReceipt(
+            env,
+            chatId,
+            userId,
+            updated.type,
+            updated.amount,
+            updated.currency,
+            updated.category,
+            messageId,
+            { txId: updated.id, merchant: updated.merchant, note: updated.note, customDate: updated.date }
+        );
+        return;
+    }
+
+    if (data.startsWith("cancel_cat:")) {
+        const txId = parseInt(data.replace("cancel_cat:", ""), 10);
+        await answerCallback(env, callback.id);
+        const row = await env.DB.prepare(
+            "SELECT id, amount, currency, category, type, merchant, note, date FROM expenses WHERE id = ? AND user_id = ?"
+        ).bind(txId, String(userId)).first();
+
+        if (row) {
+            await sendTransactionReceipt(
+                env,
+                chatId,
+                userId,
+                row.type,
+                row.amount,
+                row.currency,
+                row.category,
+                messageId,
+                { txId: row.id, merchant: row.merchant, note: row.note, customDate: row.date }
+            );
+        } else {
+            await sendTransactions(env, chatId, userId, messageId);
         }
         return;
     }

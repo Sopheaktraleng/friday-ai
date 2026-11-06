@@ -223,33 +223,7 @@ export async function handleScanConfirm(env, chatId, userId, scanId, messageId, 
 
     if (callbackId) await answerCallback(env, callbackId, { text: "✅ Slip recorded to cashflow!" });
 
-    const symbol = scan.currency === "USD" ? "$" : "";
-    const suffix = scan.currency === "KHR" ? " ៛" : "";
-    const amtStr = `${symbol}${formatMoney(scan.amount)}${suffix}`;
-    const icon = getCategoryIcon(scan.category, scan.type);
-    const cambodiaDate = formatCambodiaDateTime(scan.date || null);
-
-    if (messageId) {
-        try {
-            await telegram(env, "editMessageText", {
-                chat_id: chatId,
-                message_id: messageId,
-                text: [
-                    `✅ *Receipt Recorded*`,
-                    ``,
-                    `● *Amount:*      \`${amtStr}\``,
-                    `● *Category:*    ${icon} *${capitalize(scan.category)}*`,
-                    `● *Source:*      ${cleanMd(scan.bank || "Bank Transfer")}`,
-                    scan.merchant ? `● *Merchant:*    🏪 *${cleanMd(scan.merchant)}*` : "",
-                    `● *Date & Time:* 📅 \`${cambodiaDate.full} ICT\``,
-                    ``,
-                    `_Saved to your ledger._`
-                ].filter(Boolean).join("\n"),
-                parse_mode: "Markdown"
-            });
-        } catch (e) {}
-    }
-
+    // Single-card in-place edit: seamlessly transforms the pending scan card directly into the full transaction receipt
     await sendTransactionReceipt(
         env,
         chatId,
@@ -258,7 +232,7 @@ export async function handleScanConfirm(env, chatId, userId, scanId, messageId, 
         scan.amount,
         scan.currency,
         scan.category,
-        null,
+        messageId,
         { merchant: scan.merchant, note: scan.note, txId, customDate: scan.date }
     );
 }

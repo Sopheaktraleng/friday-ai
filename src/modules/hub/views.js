@@ -2,8 +2,9 @@ import { TIME_ZONE, isOwner, OWNER_USER_ID, hasUserPermission, formatUserPermiss
 import { ensureTables } from "../../db/schema.js";
 import { getDisplayCurrency, getFinancialSummary, getUserVoiceMode, getUserBriefingMode, getUserSettings, listAuthorizedUsers, getAuthorizedUser } from "../../db/queries.js";
 import { monthPrefix, monthLabel } from "../../utils/time.js";
-import { formatAmount, cleanMd } from "../../utils/format.js";
+import { formatAmount, formatMoney, cleanMd } from "../../utils/format.js";
 import { safeEditOrSendMessage } from "../../services/telegram.js";
+import { getExchangeRateSync } from "../../services/exchange_rate.js";
 
 export async function sendMainHub(env, chatId, userId, from, origin, messageId = null) {
     await ensureTables(env.DB);
@@ -146,6 +147,7 @@ export async function sendSettingsMenu(env, chatId, userId, messageId = null) {
     const voiceMode = settings.voice_mode;
     const briefingMode = settings.briefing_mode;
     const budgetKhr = settings.monthly_budget || 0;
+    const exchangeRate = getExchangeRateSync();
 
     const budgetStr = budgetKhr > 0 ? formatAmount(budgetKhr, displayCurrency) : "Off (No limit)";
     const currencyPill = displayCurrency === "USD" ? "💱 Currency: USD" : "💱 Currency: KHR";
@@ -156,6 +158,7 @@ export async function sendSettingsMenu(env, chatId, userId, messageId = null) {
         `⚙️ *System Settings*`,
         ``,
         `• *Display Currency:* \`${displayCurrency} (${displayCurrency === "USD" ? "$" : "៛"})\``,
+        `• *Exchange Rate:*    \`1 USD = ${formatMoney(exchangeRate)} KHR (NBC)\``,
         `• *Monthly Budget:*   \`${budgetStr}\``,
         `• *Auto-Voice Mode:*  \`${voiceMode === "on" ? "Enabled (Always Speak)" : "Disabled (Text)"}\``,
         `• *Morning Greeting:* \`${briefingMode === "on" ? "Enabled (08:00 AM)" : "Disabled (Off)"}\``,

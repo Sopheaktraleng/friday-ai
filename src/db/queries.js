@@ -362,6 +362,39 @@ export async function addExpenseRecord(db, userId, amount, category, type = "exp
     return res?.meta?.last_row_id ?? res?.meta?.changes ?? null;
 }
 
+/**
+ * Updates an expense transaction's category.
+ * Enforces ownership check against userId for security.
+ */
+export async function updateExpenseCategory(db, userId, txId, newCategory) {
+    if (!db || !userId || !txId || !newCategory) return null;
+    const cleanCategory = normalizeCategory(newCategory);
+    const id = parseInt(txId, 10);
+    if (!Number.isFinite(id) || id <= 0) return null;
+
+    try {
+        const res = await db.prepare(
+            `UPDATE expenses 
+             SET category = ? 
+             WHERE id = ? AND user_id = ?`
+        ).bind(cleanCategory, id, String(userId)).run();
+
+        const changes = res?.meta?.changes ?? 0;
+        if (changes === 0) return null;
+
+        const updated = await db.prepare(
+            `SELECT id, amount, currency, category, type, merchant, note, date, created_at 
+             FROM expenses 
+             WHERE id = ? AND user_id = ?`
+        ).bind(id, String(userId)).first();
+
+        return updated || null;
+    } catch (e) {
+        console.error("updateExpenseCategory error:", e);
+        return null;
+    }
+}
+
 export async function clearToday(db, userId) {
     await db
         .prepare("DELETE FROM expenses WHERE user_id = ? AND date = ?")
@@ -452,18 +485,34 @@ export async function setMonthlyBudget(db, userId, budgetInKhr) {
 
 /**
  * Calculates current month's budget status including visual progress bar and safe-spend burn rate.
+ * Supports zero-redundancy query options (monthlyBudget, displayCurrency, monthSummary) to eliminate duplicate DB roundtrips.
  */
-export async function getBudgetStatus(db, userId) {
+export async function getBudgetStatus(db, userId, options = {}) {
     try {
-        const [settingsRow, monthSummary, displayCurrency] = await Promise.all([
-            db.prepare("SELECT monthly_budget FROM user_settings WHERE user_id = ?").bind(userId).first(),
-            getFinancialSummary(db, userId, "month"),
-            getDisplayCurrency(db, userId)
-        ]);
+        const preBudget = options.monthlyBudget !== undefined ? Number(options.monthlyBudget) : null;
+        const preCurrency = options.displayCurrency || null;
 
-        const budgetKhr = settingsRow?.monthly_budget || 0;
+        // Fast-path: if caller supplies monthlyBudget and budget is disabled (0), exit immediately without querying D1
+        if (preBudget !== null && preBudget <= 0) {
+            return null;
+        }
+
+        const promises = [];
+        if (preBudget === null) {
+            promises.push(db.prepare("SELECT monthly_budget FROM user_settings WHERE user_id = ?").bind(String(userId)).first());
+        }
+        promises.push(options.monthSummary || getFinancialSummary(db, userId, "month"));
+        if (!preCurrency) {
+            promises.push(getDisplayCurrency(db, userId));
+        }
+
+        const results = await Promise.all(promises);
+        let idx = 0;
+        const budgetKhr = preBudget !== null ? preBudget : (results[idx++]?.monthly_budget || 0);
         if (budgetKhr <= 0) return null;
 
+        const monthSummary = results[idx++];
+        const displayCurrency = preCurrency || results[idx++] || "KHR";
         const spentKhr = monthSummary?.totalExpenseInKhr || 0;
         const percent = Math.round((spentKhr / budgetKhr) * 100);
 
