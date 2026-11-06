@@ -1,4 +1,4 @@
-import { EXCHANGE_RATE } from "../config/constants.js";
+import { getExchangeRateSync } from "../services/exchange_rate.js";
 import { today, monthPrefix } from "../utils/time.js";
 import { formatAmount, normalizeCategory } from "../utils/format.js";
 
@@ -168,8 +168,9 @@ export async function getFinancialSummary(db, userId, period) {
         }
     }
 
-    const totalIncomeInKhr = incomeKhr + (incomeUsd * EXCHANGE_RATE);
-    const totalExpenseInKhr = expenseKhr + (expenseUsd * EXCHANGE_RATE);
+    const exchangeRate = getExchangeRateSync();
+    const totalIncomeInKhr = incomeKhr + (incomeUsd * exchangeRate);
+    const totalExpenseInKhr = expenseKhr + (expenseUsd * exchangeRate);
     const balanceKhr = totalIncomeInKhr - totalExpenseInKhr;
 
     return {
@@ -184,9 +185,10 @@ export async function getFinancialSummary(db, userId, period) {
 }
 
 export async function getTotalExpenses(db, userId) {
+    const exchangeRate = getExchangeRateSync();
     const row = await db
         .prepare(
-            `SELECT COALESCE(SUM(CASE WHEN currency = 'USD' THEN amount * ${EXCHANGE_RATE} ELSE amount END), 0) AS total 
+            `SELECT COALESCE(SUM(CASE WHEN currency = 'USD' THEN amount * ${exchangeRate} ELSE amount END), 0) AS total 
              FROM expenses 
              WHERE user_id = ? AND type = 'expense'`
         )
@@ -208,11 +210,12 @@ export async function getPeriodStats(db, userId, period) {
         params = [userId];
     }
     
+    const exchangeRate = getExchangeRateSync();
     const [row, biggest] = await Promise.all([
         db.prepare(
-            `SELECT COALESCE(SUM(CASE WHEN currency = 'USD' THEN amount * ${EXCHANGE_RATE} ELSE amount END), 0) AS total,
+            `SELECT COALESCE(SUM(CASE WHEN currency = 'USD' THEN amount * ${exchangeRate} ELSE amount END), 0) AS total,
                     COUNT(*) AS count,
-                    COALESCE(AVG(CASE WHEN currency = 'USD' THEN amount * ${EXCHANGE_RATE} ELSE amount END), 0) AS average
+                    COALESCE(AVG(CASE WHEN currency = 'USD' THEN amount * ${exchangeRate} ELSE amount END), 0) AS average
              FROM expenses
              WHERE user_id = ? AND type = 'expense' AND ${condition}`
         ).bind(...params).first(),
@@ -220,7 +223,7 @@ export async function getPeriodStats(db, userId, period) {
             `SELECT amount, category, currency
              FROM expenses
              WHERE user_id = ? AND type = 'expense' AND ${condition}
-             ORDER BY (CASE WHEN currency = 'USD' THEN amount * ${EXCHANGE_RATE} ELSE amount END) DESC, id DESC
+             ORDER BY (CASE WHEN currency = 'USD' THEN amount * ${exchangeRate} ELSE amount END) DESC, id DESC
              LIMIT 1`
         ).bind(...params).first()
     ]);
@@ -247,10 +250,11 @@ export async function getCategoryRows(db, userId, period, limit) {
         params = [userId, limit];
     }
 
+    const exchangeRate = getExchangeRateSync();
     const { results } = await db
         .prepare(
             `SELECT category, 
-                    SUM(CASE WHEN currency = 'USD' THEN amount * ${EXCHANGE_RATE} ELSE amount END) AS total, 
+                    SUM(CASE WHEN currency = 'USD' THEN amount * ${exchangeRate} ELSE amount END) AS total, 
                     COUNT(*) AS count
              FROM expenses
              WHERE user_id = ? AND type = 'expense' AND ${condition}
@@ -934,10 +938,11 @@ export async function searchLedger(db, userId, options = {}) {
              LIMIT ?`
         ).bind(...params).all();
 
+        const exchangeRate = options.exchangeRate || getExchangeRateSync();
         const transactions = rows.results || [];
         let totalKhr = 0;
         for (const t of transactions) {
-            const amtKhr = t.currency === "USD" ? t.amount * EXCHANGE_RATE : t.amount;
+            const amtKhr = t.currency === "USD" ? t.amount * exchangeRate : t.amount;
             totalKhr += amtKhr;
         }
 
@@ -945,7 +950,7 @@ export async function searchLedger(db, userId, options = {}) {
             transactions,
             count: transactions.length,
             totalKhr,
-            totalUsd: Number((totalKhr / EXCHANGE_RATE).toFixed(2))
+            totalUsd: Number((totalKhr / exchangeRate).toFixed(2))
         };
     } catch (e) {
         console.warn("searchLedger error:", e.message);

@@ -1,4 +1,5 @@
-import { EXCHANGE_RATE, isUserAuthorized } from "../../config/constants.js";
+import { isUserAuthorized } from "../../config/constants.js";
+import { getExchangeRateSync } from "../../services/exchange_rate.js";
 import { today, monthLabel, dateDaysAgo, formatCambodiaDateTime, formatTimeFromCreatedAt } from "../../utils/time.js";
 import { formatAmount, formatMoney, capitalize, getCategoryIcon, generateTextProgressBar, cleanMd } from "../../utils/format.js";
 import { getDisplayCurrency, getFinancialSummary, getPeriodStats, getCategoryRows, getBudgetStatus, claimDailyBroadcast, getRecentFavorites } from "../../db/queries.js";
@@ -169,8 +170,9 @@ export async function sendAmountPicker(env, chatId, category, type = "expense", 
         const row = [];
         for (let j = 0; j < 3 && i + j < amounts.length; j++) {
             const idx = i + j;
+            const exchangeRate = getExchangeRateSync();
             row.push({
-                text: formatAmount(displayCurrency === "USD" ? amounts[idx] * EXCHANGE_RATE : amounts[idx], displayCurrency),
+                text: formatAmount(displayCurrency === "USD" ? amounts[idx] * exchangeRate : amounts[idx], displayCurrency),
                 callback_data: `${prefix}${category}:${amounts[idx]}`
             });
         }
@@ -212,11 +214,12 @@ export async function sendTransactionReceipt(env, chatId, userId, type, amount, 
     const formatted = formatMoney(amount);
     const mainAmt = `${sign}${symbol}${formatted}${suffix}`;
     
+    const exchangeRate = getExchangeRateSync();
     let altAmt = "";
     if (currency === "USD") {
-        altAmt = ` (~${formatMoney(amount * EXCHANGE_RATE)} ៛)`;
+        altAmt = ` (~${formatMoney(amount * exchangeRate)} ៛)`;
     } else {
-        altAmt = ` (~$${formatMoney(amount / EXCHANGE_RATE)})`;
+        altAmt = ` (~$${formatMoney(amount / exchangeRate)})`;
     }
 
     const icon = getCategoryIcon(category, type);
@@ -225,7 +228,7 @@ export async function sendTransactionReceipt(env, chatId, userId, type, amount, 
     const [displayCurrency, todayTotalRow, budgetStatus] = await Promise.all([
         getDisplayCurrency(env.DB, userId),
         env.DB.prepare(
-            `SELECT COALESCE(SUM(CASE WHEN currency = 'USD' THEN amount * ${EXCHANGE_RATE} ELSE amount END), 0) as total FROM expenses WHERE user_id = ? AND date = ? AND type = 'expense'`
+            `SELECT COALESCE(SUM(CASE WHEN currency = 'USD' THEN amount * ${exchangeRate} ELSE amount END), 0) as total FROM expenses WHERE user_id = ? AND date = ? AND type = 'expense'`
         ).bind(userId, today()).first(),
         !isIncome ? getBudgetStatus(env.DB, userId) : Promise.resolve(null)
     ]);
@@ -322,11 +325,12 @@ export async function sendTransactions(env, chatId, userId, messageId = null) {
     let totalIncome = 0;
     let totalExpense = 0;
 
+    const exchangeRate = getExchangeRateSync();
     const lines = results.map((row) => {
         const isIncome = row.type === "income";
         const icon = getCategoryIcon(row.category, row.type);
         const sign = isIncome ? "+" : "-";
-        const amtKhr = row.currency === "USD" ? row.amount * EXCHANGE_RATE : row.amount;
+        const amtKhr = row.currency === "USD" ? row.amount * exchangeRate : row.amount;
 
         if (isIncome) totalIncome += amtKhr;
         else totalExpense += amtKhr;
@@ -335,7 +339,7 @@ export async function sendTransactions(env, chatId, userId, messageId = null) {
         let mainAmtStr = "";
         let altAmtStr = "";
         if (displayCurrency === "USD") {
-            const usdVal = amtKhr / EXCHANGE_RATE;
+            const usdVal = amtKhr / exchangeRate;
             mainAmtStr = `${sign}$${formatMoney(usdVal, 2)}`;
             if (row.currency === "KHR") {
                 altAmtStr = ` _(${formatMoney(row.amount)} ៛)_`;
@@ -422,7 +426,7 @@ export async function sendSummary(env, chatId, userId, period = "month", message
     ];
 
     if (stats.maxAmount) {
-        const maxKhr = stats.maxCurrency === "USD" ? stats.maxAmount * EXCHANGE_RATE : stats.maxAmount;
+        const maxKhr = stats.maxCurrency === "USD" ? stats.maxAmount * getExchangeRateSync() : stats.maxAmount;
         const icon = getCategoryIcon(stats.maxCategory, "expense");
         lines.push(`● *Biggest Spend:* \`${formatAmount(maxKhr, displayCurrency)}\` (${icon} ${capitalize(stats.maxCategory)})`);
     }
@@ -674,11 +678,12 @@ export function generatePieChartUrl(categories, totalSpentStr) {
 }
 
 export async function sendWeeklyReportForUser(env, chatId, userId, startDate, endDate, titleLabel) {
+    const exchangeRate = getExchangeRateSync();
     const row = await env.DB
         .prepare(
-            `SELECT COALESCE(SUM(CASE WHEN currency = 'USD' THEN amount * ${EXCHANGE_RATE} ELSE amount END), 0) AS total,
+            `SELECT COALESCE(SUM(CASE WHEN currency = 'USD' THEN amount * ${exchangeRate} ELSE amount END), 0) AS total,
                     COUNT(*) AS count,
-                    COALESCE(AVG(CASE WHEN currency = 'USD' THEN amount * ${EXCHANGE_RATE} ELSE amount END), 0) AS average
+                    COALESCE(AVG(CASE WHEN currency = 'USD' THEN amount * ${exchangeRate} ELSE amount END), 0) AS average
              FROM expenses
              WHERE user_id = ? AND type = 'expense' AND date >= ? AND date <= ?`
         )
@@ -701,12 +706,12 @@ export async function sendWeeklyReportForUser(env, chatId, userId, startDate, en
             `SELECT amount, category, currency
              FROM expenses
              WHERE user_id = ? AND type = 'expense' AND date >= ? AND date <= ?
-             ORDER BY (CASE WHEN currency = 'USD' THEN amount * ${EXCHANGE_RATE} ELSE amount END) DESC, id DESC
+             ORDER BY (CASE WHEN currency = 'USD' THEN amount * ${exchangeRate} ELSE amount END) DESC, id DESC
              LIMIT 1`
         ).bind(userId, startDate, endDate).first(),
         env.DB.prepare(
             `SELECT category, 
-                    SUM(CASE WHEN currency = 'USD' THEN amount * ${EXCHANGE_RATE} ELSE amount END) AS total
+                    SUM(CASE WHEN currency = 'USD' THEN amount * ${exchangeRate} ELSE amount END) AS total
              FROM expenses
              WHERE user_id = ? AND type = 'expense' AND date >= ? AND date <= ?
              GROUP BY LOWER(category)
@@ -735,9 +740,9 @@ export async function sendWeeklyReportForUser(env, chatId, userId, startDate, en
         const icon = getCategoryIcon(biggest.category, "expense");
         let maxStr = `● *Biggest Spend:* \`${symbol}${amt}${suffix}\` (${icon} ${capitalize(biggest.category)})`;
         if (biggest.currency === "USD") {
-            maxStr += ` (~${formatMoney(biggest.amount * EXCHANGE_RATE)} ៛)`;
+            maxStr += ` (~${formatMoney(biggest.amount * exchangeRate)} ៛)`;
         } else {
-            maxStr += ` (~$${formatMoney(biggest.amount / EXCHANGE_RATE)})`;
+            maxStr += ` (~$${formatMoney(biggest.amount / exchangeRate)})`;
         }
         textLines.push(maxStr);
     }

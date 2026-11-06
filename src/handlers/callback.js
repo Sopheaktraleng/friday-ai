@@ -1,4 +1,5 @@
-import { TIME_ZONE, EXCHANGE_RATE, isUserAuthorizedAsync, isOwner, OWNER_USER_ID, hasUserPermission } from "../config/constants.js";
+import { TIME_ZONE, isUserAuthorizedAsync, isOwner, OWNER_USER_ID, hasUserPermission } from "../config/constants.js";
+import { getExchangeRateSync, syncExchangeRate } from "../services/exchange_rate.js";
 import { today, currentTime, getTomorrowDate } from "../utils/time.js";
 import { formatMoney, cleanMd, capitalize } from "../utils/format.js";
 import { ensureTables } from "../db/schema.js";
@@ -52,7 +53,8 @@ import {
 import {
     askClearConfirmation,
     sendCSVBackup,
-    handleExportLedgerCommand
+    handleExportLedgerCommand,
+    sendExchangeRateCard
 } from "../modules/finance/commands.js";
 import {
     sendScanHelp,
@@ -491,6 +493,19 @@ export async function handleCallback(callback, env, origin) {
                 }
             }
         );
+        return;
+    }
+
+    if (data === "view_rate") {
+        await answerCallback(env, callback.id);
+        await sendExchangeRateCard(env, chatId, userId, messageId);
+        return;
+    }
+
+    if (data === "sync_rate") {
+        await answerCallback(env, callback.id, { text: "🔄 Syncing NBC official rate..." });
+        await syncExchangeRate(env);
+        await sendExchangeRateCard(env, chatId, userId, messageId);
         return;
     }
 
@@ -1216,7 +1231,7 @@ export async function handleCallback(callback, env, origin) {
             `This action will permanently delete all transaction records for your account.`,
             ``,
             `● *Transactions:* \`${count}\``,
-            `● *Total Volume:* \`${formatMoney(total)} ៛\` (~$${formatMoney(total / EXCHANGE_RATE)})`,
+            `● *Total Volume:* \`${formatMoney(total)} ៛\` (~$${formatMoney(total / getExchangeRateSync())})`,
             ``,
             `🔒 *Backup Safety:*`,
             `A CSV backup file will be auto-generated and sent to this chat before deletion.`,

@@ -1,5 +1,6 @@
 export const TIME_ZONE = "Asia/Phnom_Penh";
-export const EXCHANGE_RATE = 4000; // 1 USD = 4000 KHR
+export const DEFAULT_EXCHANGE_RATE = 4000;
+export const EXCHANGE_RATE = 4000; // Static fallback (dynamic rates handled via src/services/exchange_rate.js)
 
 // High-speed conversational models on Groq for routine chat & quick tasks (~200ms)
 export const GROQ_MODELS = [

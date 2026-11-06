@@ -1,4 +1,5 @@
-import { TIME_ZONE, EXCHANGE_RATE, GEMINI_MODELS, GEMINI_FAST_MODELS, GEMINI_THINKING_MODELS, GROQ_MODELS, GROQ_THINKING_MODELS, OPENROUTER_MODELS, isOwner } from "../config/constants.js";
+import { TIME_ZONE, GEMINI_MODELS, GEMINI_FAST_MODELS, GEMINI_THINKING_MODELS, GROQ_MODELS, GROQ_THINKING_MODELS, OPENROUTER_MODELS, isOwner } from "../config/constants.js";
+import { getExchangeRateSync } from "./exchange_rate.js";
 import { today, currentTime, monthPrefix, normalizeReminderTime } from "../utils/time.js";
 import { cleanMd, normalizeCategory } from "../utils/format.js";
 import { arrayBufferToBase64 } from "../utils/crypto.js";
@@ -486,8 +487,9 @@ export async function buildAiUserContext(db, userId, userQuery = null) {
                 }
             }
         }
-        const totalIncomeInKhr = incomeKhr + (incomeUsd * EXCHANGE_RATE);
-        const totalExpenseInKhr = expenseKhr + (expenseUsd * EXCHANGE_RATE);
+        const exchangeRate = getExchangeRateSync();
+        const totalIncomeInKhr = incomeKhr + (incomeUsd * exchangeRate);
+        const totalExpenseInKhr = expenseKhr + (expenseUsd * exchangeRate);
         const balanceKhr = totalIncomeInKhr - totalExpenseInKhr;
         return { incomeKhr, incomeUsd, expenseKhr, expenseUsd, totalIncomeInKhr, totalExpenseInKhr, balanceKhr };
     };
@@ -495,6 +497,7 @@ export async function buildAiUserContext(db, userId, userQuery = null) {
     // Cloudflare D1 batch execution: bundles queries into a single atomic roundtrip
     if (db && typeof db.batch === "function") {
         try {
+            const exchangeRate = getExchangeRateSync();
             const stmts = [
                 db.prepare("SELECT display_currency, monthly_budget, voice_mode FROM user_settings WHERE user_id = ?").bind(userId),
                 db.prepare(
@@ -507,12 +510,12 @@ export async function buildAiUserContext(db, userId, userQuery = null) {
                     `SELECT type, currency, SUM(amount) AS total FROM expenses WHERE user_id = ? GROUP BY type, currency`
                 ).bind(userId),
                 db.prepare(
-                    `SELECT category, SUM(CASE WHEN currency = 'USD' THEN amount * ${EXCHANGE_RATE} ELSE amount END) AS total, COUNT(*) AS count
+                    `SELECT category, SUM(CASE WHEN currency = 'USD' THEN amount * ${exchangeRate} ELSE amount END) AS total, COUNT(*) AS count
                      FROM expenses WHERE user_id = ? AND type = 'expense' AND date LIKE ?
                      GROUP BY LOWER(category) ORDER BY total DESC LIMIT 5`
                 ).bind(userId, `${curMonth}%`),
                 db.prepare(
-                    `SELECT category, SUM(CASE WHEN currency = 'USD' THEN amount * ${EXCHANGE_RATE} ELSE amount END) AS total, COUNT(*) AS count
+                    `SELECT category, SUM(CASE WHEN currency = 'USD' THEN amount * ${exchangeRate} ELSE amount END) AS total, COUNT(*) AS count
                      FROM expenses WHERE user_id = ? AND type = 'expense' AND date = ?
                      GROUP BY LOWER(category) ORDER BY total DESC LIMIT 5`
                 ).bind(userId, curDate),
@@ -635,8 +638,9 @@ export async function buildAiUserContext(db, userId, userQuery = null) {
     const daysInCurrentMonth = new Date(year, monthNum, 0).getDate();
     const daysRemainingInMonth = Math.max(1, daysInCurrentMonth - dayOfMonth + 1);
 
+    const exchangeRate = getExchangeRateSync();
     const safeDailyLimitUsd = remainingBudgetKhr !== null && remainingBudgetKhr > 0
-        ? Number(((remainingBudgetKhr / EXCHANGE_RATE) / daysRemainingInMonth).toFixed(2))
+        ? Number(((remainingBudgetKhr / exchangeRate) / daysRemainingInMonth).toFixed(2))
         : 0;
     const safeDailyLimitKhr = remainingBudgetKhr !== null && remainingBudgetKhr > 0
         ? Math.round(remainingBudgetKhr / daysRemainingInMonth)
@@ -649,11 +653,11 @@ export async function buildAiUserContext(db, userId, userQuery = null) {
         displayCurrency,
         voiceMode: settingsRow?.voice_mode || "off",
         budget: budgetKhr > 0 ? {
-            limitUsd: Number((budgetKhr / EXCHANGE_RATE).toFixed(2)),
+            limitUsd: Number((budgetKhr / exchangeRate).toFixed(2)),
             limitKhr: budgetKhr,
-            spentUsd: Number((spentMonthKhr / EXCHANGE_RATE).toFixed(2)),
+            spentUsd: Number((spentMonthKhr / exchangeRate).toFixed(2)),
             spentKhr: spentMonthKhr,
-            remainingUsd: Number(((budgetKhr - spentMonthKhr) / EXCHANGE_RATE).toFixed(2)),
+            remainingUsd: Number(((budgetKhr - spentMonthKhr) / exchangeRate).toFixed(2)),
             remainingKhr: remainingBudgetKhr,
             percentUsed: Math.round((spentMonthKhr / budgetKhr) * 100),
             daysRemainingInMonth,
@@ -663,20 +667,20 @@ export async function buildAiUserContext(db, userId, userQuery = null) {
             safeDailyLimitKhr
         } : null,
         totals: {
-            allTimeNetBalanceUsd: Number(((allSummary?.balanceKhr || 0) / EXCHANGE_RATE).toFixed(2)),
+            allTimeNetBalanceUsd: Number(((allSummary?.balanceKhr || 0) / exchangeRate).toFixed(2)),
             allTimeNetBalanceKhr: allSummary?.balanceKhr || 0,
-            thisMonthExpenseUsd: Number(((monthSummary?.totalExpenseInKhr || 0) / EXCHANGE_RATE).toFixed(2)),
+            thisMonthExpenseUsd: Number(((monthSummary?.totalExpenseInKhr || 0) / exchangeRate).toFixed(2)),
             thisMonthExpenseKhr: monthSummary?.totalExpenseInKhr || 0,
-            thisMonthIncomeUsd: Number(((monthSummary?.totalIncomeInKhr || 0) / EXCHANGE_RATE).toFixed(2)),
+            thisMonthIncomeUsd: Number(((monthSummary?.totalIncomeInKhr || 0) / exchangeRate).toFixed(2)),
             thisMonthIncomeKhr: monthSummary?.totalIncomeInKhr || 0,
-            todayExpenseUsd: Number(((todaySummary?.totalExpenseInKhr || 0) / EXCHANGE_RATE).toFixed(2)),
+            todayExpenseUsd: Number(((todaySummary?.totalExpenseInKhr || 0) / exchangeRate).toFixed(2)),
             todayExpenseKhr: todaySummary?.totalExpenseInKhr || 0,
-            todayIncomeUsd: Number(((todaySummary?.totalIncomeInKhr || 0) / EXCHANGE_RATE).toFixed(2)),
+            todayIncomeUsd: Number(((todaySummary?.totalIncomeInKhr || 0) / exchangeRate).toFixed(2)),
             todayIncomeKhr: todaySummary?.totalIncomeInKhr || 0
         },
         topMonthCategories: (monthCats || []).map(c => ({
             category: c.category,
-            totalUsd: Number((c.total / EXCHANGE_RATE).toFixed(2)),
+            totalUsd: Number((c.total / exchangeRate).toFixed(2)),
             totalKhr: c.total,
             count: c.count
         })),
@@ -1183,7 +1187,7 @@ export async function executeCopilotTool(db, userId, chatId, toolName, toolArgs 
             case "set_budget": {
                 const amt = parseFloat(toolArgs.amount);
                 const curr = (toolArgs.currency || "USD").toUpperCase();
-                const budgetKhr = curr === "USD" ? Math.round(amt * EXCHANGE_RATE) : Math.round(amt);
+                const budgetKhr = curr === "USD" ? Math.round(amt * getExchangeRateSync()) : Math.round(amt);
                 await setMonthlyBudget(db, userId, budgetKhr);
                 return { success: true, budgetLimitKhr: budgetKhr };
             }

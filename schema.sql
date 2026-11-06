@@ -252,3 +252,11 @@ END;
 CREATE TRIGGER IF NOT EXISTS trg_expenses_au AFTER UPDATE ON expenses BEGIN
     UPDATE expenses_fts SET category = new.category, type = new.type, currency = new.currency, date = new.date WHERE rowid = new.id;
 END;
+
+-- 10. SYSTEM CONFIGURATION & DYNAMIC RATES
+CREATE TABLE IF NOT EXISTS system_config (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+

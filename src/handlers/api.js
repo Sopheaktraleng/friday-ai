@@ -1,4 +1,5 @@
-import { EXCHANGE_RATE, isUserAuthorized, isOwner, hasUserPermission, DEFAULT_GUEST_PERMISSIONS } from "../config/constants.js";
+import { isUserAuthorized, isOwner, hasUserPermission, DEFAULT_GUEST_PERMISSIONS } from "../config/constants.js";
+import { getExchangeRateSync } from "../services/exchange_rate.js";
 import { today, currentTime, monthPrefix, monthLabel, dateDaysAgo, getPreviousWorkdayDate } from "../utils/time.js";
 import { capitalize, json } from "../utils/format.js";
 import { validateTelegramInitData } from "../utils/crypto.js";
@@ -63,6 +64,7 @@ export async function handleApiRequest(request, env) {
     if (request.method === "GET" || request.method === "HEAD") {
         if (url.pathname === "/api/data") {
             await ensureTables(env.DB);
+            const exchangeRate = getExchangeRateSync();
             const summary = hasFinance ? await getFinancialSummary(env.DB, userId, "all") : { balanceKhr: 0, totalIncomeInKhr: 0, totalExpenseInKhr: 0 };
             const categories = hasFinance ? await getCategoryRows(env.DB, userId, "month", 10) : [];
 
@@ -81,7 +83,7 @@ export async function handleApiRequest(request, env) {
                 const maxDate = past7Days[past7Days.length - 1];
 
                 const dayRows = await env.DB.prepare(
-                    `SELECT date, COALESCE(SUM(CASE WHEN currency = 'USD' THEN amount * ${EXCHANGE_RATE} ELSE amount END), 0) AS total
+                    `SELECT date, COALESCE(SUM(CASE WHEN currency = 'USD' THEN amount * ${exchangeRate} ELSE amount END), 0) AS total
                      FROM expenses
                      WHERE user_id = ? AND type = 'expense' AND date >= ? AND date <= ?
                      GROUP BY date`
@@ -127,6 +129,7 @@ export async function handleApiRequest(request, env) {
             recent: recentRows.results || [],
             budgetKhr,
             monthExpenseKhr,
+            exchange_rate: exchangeRate,
             activeReminder: activeReminder || null,
             lunchboxReminder: activeReminder || null,
             permissions: {

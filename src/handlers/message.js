@@ -41,7 +41,8 @@ import {
     handleBudgetCommand,
     askClearConfirmation,
     handleExportLedgerCommand,
-    handleSearchExpensesCommand
+    handleSearchExpensesCommand,
+    handleRateCommand
 } from "../modules/finance/commands.js";
 import {
     handleImageReceipt,
@@ -878,6 +879,16 @@ export async function handleMessage(message, env, origin) {
             return;
         }
         await handleBudgetCommand(env, chatId, userId, text);
+        return;
+    }
+
+    // Exchange rate
+    if (text === "/rate" || text.startsWith("/rate ") || text === "/exchange") {
+        if (!checkFeature("Finance", "finance")) {
+            await sendFeatureRestricted(env, chatId, "Exchange Rate", message.from);
+            return;
+        }
+        await handleRateCommand(env, chatId, userId, text);
         return;
     }
 

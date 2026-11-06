@@ -10,6 +10,7 @@ import { sendWeeklyScheduledReports } from "./modules/finance/views.js";
 import { sendDailyScheduledBriefings } from "./modules/copilot/briefing.js";
 import { sendMessage, answerCallback, syncBotCommands } from "./services/telegram.js";
 import { isUserAuthorizedAsync } from "./config/constants.js";
+import { getExchangeRate, syncExchangeRate } from "./services/exchange_rate.js";
 
 /**
  * Safely processes Telegram updates with idempotency check against duplicate deliveries.
@@ -19,6 +20,11 @@ async function handleUpdateSafely(update, env, origin) {
         const isDuplicate = await wasUpdateProcessed(env.DB, update.update_id);
         if (isDuplicate) {
             return;
+        }
+
+        // Prime active exchange rate cache from D1 (<1ms cold start, 0ms warm)
+        if (env.DB) {
+            await getExchangeRate(env.DB).catch(() => {});
         }
 
         // Authorization check: ensure only the owner/authorized users can use this assistant
@@ -140,6 +146,15 @@ export default {
         }
 
         if (request.method === "GET") {
+            if (url.pathname === "/sync-rate") {
+                const secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token") || url.searchParams.get("secret");
+                if (env.WEBHOOK_SECRET && (!secret || !timingSafeEqual(secret, env.WEBHOOK_SECRET.trim()))) {
+                    return json({ ok: false, error: "Unauthorized" }, 401);
+                }
+                const res = await syncExchangeRate(env);
+                return json({ ok: true, result: res });
+            }
+
             if (url.pathname === "/init-commands" || url.pathname === "/set-commands") {
                 const secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token") || url.searchParams.get("secret");
                 if (env.WEBHOOK_SECRET && (!secret || !timingSafeEqual(secret, env.WEBHOOK_SECRET.trim()))) {
@@ -174,6 +189,9 @@ export default {
             // Daily at 01:00 UTC (8:00 AM ICT) - Morning Greeting, Weekly Report & Database Hygiene
             const isBriefingSlot = isDedicatedBriefing || (isGeneralMinuteCron && utcHours === 1 && utcMinutes === 0);
             if (isBriefingSlot) {
+                // Daily NBC official exchange rate auto-sync (non-blocking)
+                await syncExchangeRate(env).catch(e => console.error("Exchange rate sync failed:", e));
+
                 await sendDailyScheduledBriefings(env);
 
                 // Monday Weekly Spending Report

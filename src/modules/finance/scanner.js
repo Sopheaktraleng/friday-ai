@@ -1,4 +1,5 @@
-import { EXCHANGE_RATE, QUICK_EXPENSE_CATS } from "../../config/constants.js";
+import { QUICK_EXPENSE_CATS } from "../../config/constants.js";
+import { getExchangeRateSync } from "../../services/exchange_rate.js";
 import { today, formatCambodiaDateTime } from "../../utils/time.js";
 import { cleanMd, formatMoney, capitalize, getCategoryIcon, normalizeCategory } from "../../utils/format.js";
 import { arrayBufferToBase64 } from "../../utils/crypto.js";
@@ -22,11 +23,12 @@ export function formatPendingScanText(scan, duplicate = null) {
     const suffix = scan.currency === "KHR" ? " ៛" : "";
     const mainAmt = `${sign}${symbol}${formatMoney(scan.amount)}${suffix}`;
 
+    const exchangeRate = getExchangeRateSync();
     let altAmt = "";
     if (scan.currency === "USD") {
-        altAmt = ` (~${formatMoney(scan.amount * EXCHANGE_RATE)} ៛)`;
+        altAmt = ` (~${formatMoney(scan.amount * exchangeRate)} ៛)`;
     } else {
-        altAmt = ` (~$${formatMoney(scan.amount / EXCHANGE_RATE)})`;
+        altAmt = ` (~$${formatMoney(scan.amount / exchangeRate)})`;
     }
 
     const icon = getCategoryIcon(scan.category, scan.type);

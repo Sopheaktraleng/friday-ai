@@ -115,6 +115,11 @@ const TABLE_SCHEMAS = [
         transactions_json TEXT NOT NULL,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES authorized_users(user_id) ON DELETE CASCADE
+    );`,
+    `CREATE TABLE IF NOT EXISTS system_config (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );`
 ];
 
@@ -141,6 +146,7 @@ export async function ensureTables(db) {
             "ALTER TABLE expenses ADD COLUMN merchant TEXT",
             "ALTER TABLE expenses ADD COLUMN note TEXT",
             "ALTER TABLE authorized_users ADD COLUMN permissions TEXT NOT NULL DEFAULT 'finance,tasks,reminders,ai_dialog'",
+            "CREATE TABLE IF NOT EXISTS system_config (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
             // Clean up redundant duplicate indexes
             "DROP INDEX IF EXISTS idx_work_logs_user_date",
             "DROP INDEX IF EXISTS idx_broadcast_logs_user_date",

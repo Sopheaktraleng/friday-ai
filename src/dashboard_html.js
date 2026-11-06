@@ -977,7 +977,7 @@ export default `<!DOCTYPE html>
             return originalFetch(resource, init);
         };
 
-        const EXCHANGE_RATE = 4000;
+        let EXCHANGE_RATE = 4000;
 
         function formatKhr(value) {
             return Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 0 }) + " ៛";
@@ -1114,6 +1114,10 @@ export default `<!DOCTYPE html>
                     else if (data.permissions.tasks) switchMainTab('work');
                     else if (data.permissions.reminders) switchMainTab('reminders');
                 }
+            }
+
+            if (data.exchange_rate) {
+                EXCHANGE_RATE = Number(data.exchange_rate);
             }
 
             const balanceKhr = data.summary?.balanceKhr || 0;

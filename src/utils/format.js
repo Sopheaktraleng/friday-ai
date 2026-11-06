@@ -1,4 +1,4 @@
-import { EXCHANGE_RATE } from "../config/constants.js";
+import { getExchangeRateSync } from "../services/exchange_rate.js";
 
 export function cleanMd(text) {
     if (!text) return "";
@@ -19,10 +19,11 @@ export function formatMoney(value, minDecimals = 0, maxDecimals = 2) {
     });
 }
 
-export function formatAmount(amountInKhr, displayCurrency, forceDecimals = false) {
+export function formatAmount(amountInKhr, displayCurrency, forceDecimals = false, customRate = null) {
+    const exchangeRate = customRate || getExchangeRateSync();
     const numKhr = Number(amountInKhr) || 0;
     if (displayCurrency === "USD") {
-        const usd = numKhr / EXCHANGE_RATE;
+        const usd = numKhr / exchangeRate;
         const isNegative = usd < 0;
         const absUsd = Math.abs(usd);
         const hasCents = absUsd % 1 !== 0;

@@ -11,7 +11,8 @@ import {
     saveUserMemory,
     getBudgetWarningText
 } from "../../db/queries.js";
-import { EXCHANGE_RATE, isOwner } from "../../config/constants.js";
+import { isOwner } from "../../config/constants.js";
+import { getExchangeRateSync } from "../../services/exchange_rate.js";
 import { ensureTables } from "../../db/schema.js";
 import { telegram, sendMessage, safeEditOrSendMessage, sendTelegramVoice } from "../../services/telegram.js";
 import { buildAiUserContext, askAiCopilot, generateSpeechAudio } from "../../services/ai.js";
@@ -454,7 +455,7 @@ export async function handleAiCopilotQuery(env, chatId, userId, query, from, mes
                     await setDisplayCurrency(env.DB, userId, act.currency.toUpperCase());
                 } else if (act.type === "set_budget" && act.amount && act.amount > 0) {
                     const bCurr = (act.currency || context.displayCurrency || "USD").toUpperCase();
-                    const budgetKhr = bCurr === "USD" ? Math.round(act.amount * EXCHANGE_RATE) : Math.round(act.amount);
+                    const budgetKhr = bCurr === "USD" ? Math.round(act.amount * getExchangeRateSync()) : Math.round(act.amount);
                     await setMonthlyBudget(env.DB, userId, budgetKhr);
                 } else if (act.type === "clear_today_expenses") {
                     await clearToday(env.DB, userId);

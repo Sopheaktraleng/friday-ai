@@ -1,4 +1,5 @@
-import { EXCHANGE_RATE } from "../../config/constants.js";
+import { isOwner } from "../../config/constants.js";
+import { getExchangeRateSync, getExchangeRateDetails, setManualExchangeRate, syncExchangeRate } from "../../services/exchange_rate.js";
 import { today } from "../../utils/time.js";
 import { formatMoney, capitalize } from "../../utils/format.js";
 import { getDisplayCurrency, addExpenseRecord, setMonthlyBudget, getBudgetStatus } from "../../db/queries.js";
@@ -105,11 +106,12 @@ export async function handleBudgetCommand(env, chatId, userId, text) {
         currency = await getDisplayCurrency(env.DB, userId);
     }
 
-    const budgetInKhr = currency === "USD" ? amount * EXCHANGE_RATE : amount;
+    const exchangeRate = getExchangeRateSync();
+    const budgetInKhr = currency === "USD" ? amount * exchangeRate : amount;
     await setMonthlyBudget(env.DB, userId, budgetInKhr);
 
     const formattedAmount = currency === "USD" ? `$${formatMoney(amount)}` : `${formatMoney(amount)} ៛`;
-    const altAmount = currency === "USD" ? `${formatMoney(budgetInKhr)} ៛` : `$${formatMoney(amount / EXCHANGE_RATE)}`;
+    const altAmount = currency === "USD" ? `${formatMoney(budgetInKhr)} ៛` : `$${formatMoney(amount / exchangeRate)}`;
     await sendMessage(
         env,
         chatId,
@@ -218,3 +220,145 @@ export async function sendCSVBackup(env, chatId, userId) {
     const file = new File([csvContent], `cashflow_backup_${today()}.csv`, { type: "text/csv" });
     await sendTelegramDocument(env, chatId, file, "Here is a CSV backup of your expenses before wiping.");
 }
+
+/**
+ * Renders and sends the currency exchange rate status card with live NBC metadata.
+ */
+export async function sendExchangeRateCard(env, chatId, userId, messageId = null) {
+    let details = await getExchangeRateDetails(env?.DB);
+
+    // If exchange rate has never been synced yet, automatically fetch from NBC immediately
+    if (details.source === "DEFAULT") {
+        const syncRes = await syncExchangeRate(env);
+        if (syncRes.success) {
+            details = await getExchangeRateDetails(env?.DB);
+        }
+    }
+
+    const sourceLabel = details.source === "NBC"
+        ? "National Bank of Cambodia (NBC) Official Rate"
+        : details.source === "OpenExchange"
+            ? "OpenExchange Fallback Market Rate"
+            : details.source === "MANUAL"
+                ? "Manual User Override"
+                : "Standard Baseline";
+
+    const lastUpdated = details.updatedAt
+        ? new Date(details.updatedAt).toLocaleString("en-US", { timeZone: "Asia/Phnom_Penh", dateStyle: "medium", timeStyle: "short" })
+        : (details.date || "Today");
+
+    const text = [
+        `💱 *F.R.I.D.A.Y. • Currency Exchange Rate*`,
+        ``,
+        `• *Active Rate:* \`1 USD = ${formatMoney(details.rate)} KHR\``,
+        `• *Source:* ${sourceLabel}`,
+        `• *Last Updated:* \`${lastUpdated}\``,
+        `• *Auto-Sync:* \`Daily at 08:00 AM ICT (NBC Official)\``,
+        ``,
+        `_All financial totals, budget progress, and receipt conversions automatically apply this rate._`,
+        ``,
+        `💡 *Shortcuts:*\n• Override: \`/rate 4100\`\n• Force Sync: \`/rate sync\``
+    ].join("\n");
+
+    const keyboard = [
+        [
+            { text: "🔄 Sync NBC Rate Now", callback_data: "sync_rate" }
+        ],
+        [
+            { text: "⚙️ System Settings", callback_data: "settings" },
+            { text: "🏠 Main Hub", callback_data: "hub" }
+        ]
+    ];
+
+    await safeEditOrSendMessage(env, chatId, messageId, text, {
+        parse_mode: "Markdown",
+        reply_markup: { inline_keyboard: keyboard }
+    });
+}
+
+/**
+ * Handles the /rate command:
+ * - /rate : View active exchange rate and source
+ * - /rate sync | /rate auto : Immediately fetch fresh rate from NBC
+ * - /rate <amount> : Manually set preferred rate (e.g. /rate 4100)
+ */
+export async function handleRateCommand(env, chatId, userId, text) {
+    const parts = text.trim().split(/\s+/);
+    if (parts.length === 1) {
+        await sendExchangeRateCard(env, chatId, userId);
+        return;
+    }
+
+    const arg = parts[1].toLowerCase();
+
+    if (arg === "sync" || arg === "auto" || arg === "refresh") {
+        const syncRes = await syncExchangeRate(env);
+        if (syncRes.success) {
+            await sendMessage(
+                env,
+                chatId,
+                `✅ *Exchange Rate Synchronized*\n\n` +
+                `• *Official Rate:* \`1 USD = ${formatMoney(syncRes.rate)} KHR\`\n` +
+                `• *Source:* ${syncRes.source === "NBC" ? "National Bank of Cambodia (NBC)" : syncRes.source}\n` +
+                `• *Date:* \`${syncRes.date}\`\n\n` +
+                `_All conversions and ledgers updated._`,
+                {
+                    parse_mode: "Markdown",
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: "💱 View Rate Card", callback_data: "view_rate" }],
+                            [{ text: "🏠 Main Hub", callback_data: "hub" }]
+                        ]
+                    }
+                }
+            );
+        } else {
+            await sendMessage(
+                env,
+                chatId,
+                `⚠️ *Could not reach NBC rate servers.*\n\nRetaining active rate: \`1 USD = ${formatMoney(syncRes.rate)} KHR\`.`,
+                { parse_mode: "Markdown" }
+            );
+        }
+        return;
+    }
+
+    const customRate = parseInt(arg, 10);
+    if (!Number.isFinite(customRate) || customRate < 3000 || customRate > 6000) {
+        await sendMessage(
+            env,
+            chatId,
+            `💡 *Usage:*\n` +
+            `• View Rate: \`/rate\`\n` +
+            `• Sync from NBC: \`/rate sync\`\n` +
+            `• Manual Override: \`/rate 4100\`\n\n` +
+            `_Rate must be a realistic number between 3,000 and 6,000 KHR._`,
+            { parse_mode: "Markdown" }
+        );
+        return;
+    }
+
+    const ok = await setManualExchangeRate(env.DB, customRate, userId);
+    if (ok) {
+        await sendMessage(
+            env,
+            chatId,
+            `✅ *Exchange Rate Updated*\n\n` +
+            `• *New Active Rate:* \`1 USD = ${formatMoney(customRate)} KHR\`\n` +
+            `• *Source:* Manual Override\n\n` +
+            `_All subsequent transactions and summary reports will use this rate._`,
+            {
+                parse_mode: "Markdown",
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: "🔄 Revert to NBC Official Rate", callback_data: "sync_rate" }],
+                        [{ text: "🏠 Main Hub", callback_data: "hub" }]
+                    ]
+                }
+            }
+        );
+    } else {
+        await sendMessage(env, chatId, "❌ Failed to update exchange rate.");
+    }
+}
+

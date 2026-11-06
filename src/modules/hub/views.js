@@ -409,6 +409,7 @@ export async function sendHelpMessage(env, chatId, messageId = null, userId = nu
             `💳 *Finance & Cashflow*`,
             `• \`/today\` — Today's transactions & balance`,
             `• \`/summary\` — Monthly spending breakdown & analytics`,
+            `• \`/rate\` — NBC daily official exchange rate (USD ⇄ KHR)`,
             `• \`/settings\` — Currency toggle (USD / KHR) & monthly budget`,
             ``
         );
