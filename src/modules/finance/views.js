@@ -1,8 +1,8 @@
-import { isUserAuthorized, QUICK_EXPENSE_CATS, QUICK_INCOME_CATS } from "../../config/constants.js";
+import { isUserAuthorized } from "../../config/constants.js";
 import { getExchangeRateSync } from "../../services/exchange_rate.js";
 import { today, monthLabel, dateDaysAgo, formatCambodiaDateTime, formatTimeFromCreatedAt } from "../../utils/time.js";
 import { formatAmount, formatMoney, capitalize, getCategoryIcon, generateTextProgressBar, cleanMd } from "../../utils/format.js";
-import { getDisplayCurrency, getUserSettings, getFinancialSummary, getPeriodStats, getCategoryRows, getBudgetStatus, claimDailyBroadcast, getRecentFavorites, updateExpenseCategory } from "../../db/queries.js";
+import { getDisplayCurrency, getUserSettings, getFinancialSummary, getPeriodStats, getCategoryRows, getBudgetStatus, claimDailyBroadcast, getRecentFavorites } from "../../db/queries.js";
 import { ensureTables } from "../../db/schema.js";
 import { telegram, sendMessage, safeEditOrSendMessage } from "../../services/telegram.js";
 
@@ -200,60 +200,6 @@ export async function sendAmountPicker(env, chatId, category, type = "expense", 
     });
 }
 
-/**
- * Renders an inline 1-tap category picker to quickly reassign an existing transaction's category.
- */
-export async function sendTransactionCategoryPicker(env, chatId, userId, txId, messageId = null) {
-    const id = parseInt(txId, 10);
-    if (!Number.isFinite(id) || id <= 0) return;
-
-    const row = await env.DB.prepare(
-        "SELECT id, amount, currency, category, type, merchant FROM expenses WHERE id = ? AND user_id = ?"
-    ).bind(id, String(userId)).first();
-
-    if (!row) {
-        await safeEditOrSendMessage(env, chatId, messageId, "⚠️ Transaction not found or already deleted.", {
-            reply_markup: {
-                inline_keyboard: [[{ text: "‹ Back to Ledger", callback_data: "view_transactions" }]]
-            }
-        });
-        return;
-    }
-
-    const symbol = row.currency === "USD" ? "$" : "";
-    const suffix = row.currency === "KHR" ? " ៛" : "";
-    const amtStr = `${symbol}${formatMoney(row.amount)}${suffix}`;
-    const currentIcon = getCategoryIcon(row.category, row.type);
-
-    const text = [
-        `🏷️ *Change Category*`,
-        ``,
-        `• *Transaction:* \`${amtStr}\` (${currentIcon} *${capitalize(row.category)}*)`,
-        row.merchant ? `• *Merchant:* 🏪 *${cleanMd(row.merchant)}*` : null,
-        ``,
-        `_Select the correct category below:_`
-    ].filter(Boolean).join("\n");
-
-    const categories = row.type === "income" ? QUICK_INCOME_CATS : QUICK_EXPENSE_CATS;
-    const keyboard = [];
-    for (let i = 0; i < categories.length; i += 3) {
-        const rowBtns = categories.slice(i, i + 3).map(c => ({
-            text: `${c.icon} ${c.name}`,
-            callback_data: `set_cat:${id}:${c.name}`
-        }));
-        keyboard.push(rowBtns);
-    }
-
-    keyboard.push([
-        { text: "‹ Cancel (Keep Current)", callback_data: `cancel_cat:${id}` }
-    ]);
-
-    await safeEditOrSendMessage(env, chatId, messageId, text, {
-        parse_mode: "Markdown",
-        reply_markup: { inline_keyboard: keyboard }
-    });
-}
-
 export async function sendTransactionReceipt(env, chatId, userId, type, amount, currency, category, messageId = null, extra = {}) {
     // Graceful support if caller passed options as 8th argument
     if (messageId && typeof messageId === "object" && !extra.txId && !extra.merchant && !extra.note) {
@@ -334,7 +280,6 @@ export async function sendTransactionReceipt(env, chatId, userId, type, amount, 
 
     const actionRow = [];
     if (extra.txId) {
-        actionRow.push({ text: "🏷️ Category", callback_data: `edit_cat:${extra.txId}` });
         actionRow.push({ text: "❌ Undo", callback_data: `undo_tx:${extra.txId}` });
     }
     actionRow.push({ text: "💳 Finance", callback_data: "finance_hub" });

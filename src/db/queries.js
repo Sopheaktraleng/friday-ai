@@ -362,39 +362,6 @@ export async function addExpenseRecord(db, userId, amount, category, type = "exp
     return res?.meta?.last_row_id ?? res?.meta?.changes ?? null;
 }
 
-/**
- * Updates an expense transaction's category.
- * Enforces ownership check against userId for security.
- */
-export async function updateExpenseCategory(db, userId, txId, newCategory) {
-    if (!db || !userId || !txId || !newCategory) return null;
-    const cleanCategory = normalizeCategory(newCategory);
-    const id = parseInt(txId, 10);
-    if (!Number.isFinite(id) || id <= 0) return null;
-
-    try {
-        const res = await db.prepare(
-            `UPDATE expenses 
-             SET category = ? 
-             WHERE id = ? AND user_id = ?`
-        ).bind(cleanCategory, id, String(userId)).run();
-
-        const changes = res?.meta?.changes ?? 0;
-        if (changes === 0) return null;
-
-        const updated = await db.prepare(
-            `SELECT id, amount, currency, category, type, merchant, note, date, created_at 
-             FROM expenses 
-             WHERE id = ? AND user_id = ?`
-        ).bind(id, String(userId)).first();
-
-        return updated || null;
-    } catch (e) {
-        console.error("updateExpenseCategory error:", e);
-        return null;
-    }
-}
-
 export async function clearToday(db, userId) {
     await db
         .prepare("DELETE FROM expenses WHERE user_id = ? AND date = ?")

@@ -265,7 +265,7 @@ export async function sendExchangeRateCard(env, chatId, userId, messageId = null
             { text: "🔄 Sync NBC Rate Now", callback_data: "sync_rate" }
         ],
         [
-            { text: "⚙️ System Settings", callback_data: "settings" },
+            { text: "💳 Finance Hub", callback_data: "finance_hub" },
             { text: "🏠 Main Hub", callback_data: "hub" }
         ]
     ];

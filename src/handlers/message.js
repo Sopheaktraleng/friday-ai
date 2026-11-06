@@ -333,10 +333,10 @@ export async function handleMessage(message, env, origin) {
                 reply_markup: {
                     inline_keyboard: [
                         [
-                            { text: mode === "on" ? "📝 Turn Voice OFF" : "🎙️ Turn Voice ON", callback_data: "toggle_voice_mode" }
+                            { text: "🔊 Read Aloud Last Msg", callback_data: "speak_last" },
+                            { text: "⚙️ System Settings", callback_data: "settings" }
                         ],
                         [
-                            { text: "🔊 Read Aloud Last Msg", callback_data: "speak_last" },
                             { text: "🏠 Main Hub", callback_data: "hub" }
                         ]
                     ]

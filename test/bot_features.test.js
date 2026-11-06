@@ -234,9 +234,9 @@ describe("Bot Improvements & Stability", () => {
             expect(buttonTexts).toContain("🎙️ Voice: OFF");
             expect(buttonTexts).toContain("🌅 Briefing: ON");
             expect(buttonTexts).toContain("🎯 Set Budget");
-            expect(buttonTexts).toContain("📥 Export CSV");
             expect(buttonTexts).toContain("🗑️ Reset Data");
             expect(buttonTexts).toContain("🏠 Main Hub");
+            expect(buttonTexts.some(t => t.includes("Export CSV"))).toBe(false);
             expect(buttonTexts.some(t => t.includes("Manage Users"))).toBe(false);
 
             fetchSpy.mockRestore();

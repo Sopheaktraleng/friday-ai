@@ -1,64 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { updateExpenseCategory, getBudgetStatus, getUserSettings } from "../src/db/queries.js";
-import { sendTransactionReceipt, sendTransactionCategoryPicker } from "../src/modules/finance/views.js";
+import { getBudgetStatus, getUserSettings } from "../src/db/queries.js";
+import { sendTransactionReceipt } from "../src/modules/finance/views.js";
 import { handleScanConfirm } from "../src/modules/finance/scanner.js";
-import { handleCallback } from "../src/handlers/callback.js";
 import { sendSettingsMenu } from "../src/modules/hub/views.js";
+import { sendExchangeRateCard } from "../src/modules/finance/commands.js";
 import { setExchangeRateInMemory, resetExchangeRateCacheForTest } from "../src/services/exchange_rate.js";
 
-describe("Category Reassignment, Single-Card Confirmation & Query Optimization", () => {
+describe("Receipt Flow, Single-Card Confirmation & Query Optimization", () => {
     beforeEach(() => {
         resetExchangeRateCacheForTest();
         vi.restoreAllMocks();
     });
 
-    describe("1. updateExpenseCategory Query & Security Check", () => {
-        it("should update category in D1 when user_id matches", async () => {
-            const mockDb = {
-                prepare: vi.fn().mockImplementation((sql) => ({
-                    bind: vi.fn().mockReturnValue({
-                        run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
-                        first: vi.fn().mockResolvedValue({
-                            id: 101,
-                            amount: 4.5,
-                            currency: "USD",
-                            category: "Coffee",
-                            type: "expense",
-                            merchant: "Starbucks",
-                            date: "2026-11-06"
-                        })
-                    })
-                }))
-            };
-
-            const result = await updateExpenseCategory(mockDb, "user_123", 101, "Coffee");
-            expect(result).not.toBeNull();
-            expect(result.category).toBe("Coffee");
-            expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringMatching(/UPDATE\s+expenses\s+SET\s+category\s*=\s*\?\s+WHERE\s+id\s*=\s*\?\s+AND\s+user_id\s*=\s*\?/i));
-        });
-
-        it("should refuse update and return null if user_id does not own the transaction", async () => {
-            const mockDb = {
-                prepare: vi.fn().mockImplementation(() => ({
-                    bind: vi.fn().mockReturnValue({
-                        run: vi.fn().mockResolvedValue({ meta: { changes: 0 } })
-                    })
-                }))
-            };
-
-            const result = await updateExpenseCategory(mockDb, "hacker_user", 101, "Food");
-            expect(result).toBeNull();
-        });
-
-        it("should reject invalid transaction IDs or null inputs", async () => {
-            expect(await updateExpenseCategory(null, "user_1", 101, "Food")).toBeNull();
-            expect(await updateExpenseCategory({}, null, 101, "Food")).toBeNull();
-            expect(await updateExpenseCategory({}, "user_1", -5, "Food")).toBeNull();
-            expect(await updateExpenseCategory({}, "user_1", 101, "")).toBeNull();
-        });
-    });
-
-    describe("2. Zero-Redundancy Query Optimization in getBudgetStatus", () => {
+    describe("1. Zero-Redundancy Query Optimization in getBudgetStatus", () => {
         it("should return null in 0ms without querying D1 when monthlyBudget is 0 (budget disabled)", async () => {
             const mockDb = {
                 prepare: vi.fn()
@@ -96,8 +50,8 @@ describe("Category Reassignment, Single-Card Confirmation & Query Optimization",
         });
     });
 
-    describe("3. sendTransactionReceipt Category Button & Receipt Layout", () => {
-        it("should include [🏷️ Category] button when txId is provided in extra", async () => {
+    describe("2. Clean Receipt Layout with Undo Action", () => {
+        it("should include [❌ Undo] button without clutter when txId is provided", async () => {
             const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
                 Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }))
             );
@@ -133,8 +87,7 @@ describe("Category Reassignment, Single-Card Confirmation & Query Optimization",
             const buttons = keyboard.flat();
 
             const catBtn = buttons.find(b => b.text.includes("Category"));
-            expect(catBtn).toBeDefined();
-            expect(catBtn.callback_data).toBe("edit_cat:777");
+            expect(catBtn).toBeUndefined(); // Category button cleanly removed
 
             const undoBtn = buttons.find(b => b.text.includes("Undo"));
             expect(undoBtn).toBeDefined();
@@ -142,133 +95,7 @@ describe("Category Reassignment, Single-Card Confirmation & Query Optimization",
         });
     });
 
-    describe("4. sendTransactionCategoryPicker & Callback Handlers", () => {
-        it("sendTransactionCategoryPicker should render 3-column category grid with cancel button", async () => {
-            const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
-                Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }))
-            );
-
-            const mockDb = {
-                prepare: vi.fn().mockReturnValue({
-                    bind: vi.fn().mockReturnValue({
-                        first: vi.fn().mockResolvedValue({
-                            id: 777,
-                            amount: 5,
-                            currency: "USD",
-                            category: "Other",
-                            type: "expense",
-                            merchant: "Starbucks"
-                        })
-                    })
-                })
-            };
-
-            const mockEnv = { DB: mockDb, TELEGRAM_BOT_TOKEN: "mock_token" };
-            await sendTransactionCategoryPicker(mockEnv, 12345, "user_1", 777, 999);
-
-            expect(fetchSpy).toHaveBeenCalled();
-            const payload = JSON.parse(fetchSpy.mock.calls[0][1].body);
-            expect(payload.text).toContain("Change Category");
-            expect(payload.text).toContain("Starbucks");
-
-            const buttons = payload.reply_markup.inline_keyboard.flat();
-            expect(buttons.some(b => b.callback_data === "set_cat:777:Coffee")).toBe(true);
-            expect(buttons.some(b => b.callback_data === "set_cat:777:Food")).toBe(true);
-            expect(buttons.some(b => b.callback_data === "cancel_cat:777")).toBe(true);
-        });
-
-        it("handleCallback should handle edit_cat and open category picker", async () => {
-            const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
-                Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }))
-            );
-
-            const mockDb = {
-                prepare: vi.fn().mockReturnValue({
-                    bind: vi.fn().mockReturnValue({
-                        first: vi.fn().mockResolvedValue({
-                            id: 888,
-                            amount: 10,
-                            currency: "USD",
-                            category: "Other",
-                            type: "expense"
-                        })
-                    })
-                })
-            };
-
-            const mockEnv = { DB: mockDb, TELEGRAM_BOT_TOKEN: "mock_token" };
-            const callback = {
-                id: "cb_edit",
-                data: "edit_cat:888",
-                from: { id: "849550186" },
-                message: { chat: { id: 12345 }, message_id: 111 }
-            };
-
-            await handleCallback(callback, mockEnv, "https://bot.example.com");
-
-            const editCall = fetchSpy.mock.calls.find(c => typeof c[0] === "string" && c[0].includes("editMessageText"));
-            expect(editCall).toBeDefined();
-            const payload = JSON.parse(editCall[1].body);
-            expect(payload.text).toContain("Change Category");
-        });
-
-        it("handleCallback should handle set_cat, update D1, and refresh receipt in-place", async () => {
-            const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
-                Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }))
-            );
-
-            const mockDb = {
-                prepare: vi.fn().mockImplementation((sql) => ({
-                    bind: vi.fn().mockReturnValue({
-                        run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
-                        first: vi.fn().mockImplementation(async () => {
-                            if (sql.includes("FROM expenses") && sql.includes("WHERE id = ?")) {
-                                return {
-                                    id: 888,
-                                    amount: 4.5,
-                                    currency: "USD",
-                                    category: "Coffee",
-                                    type: "expense",
-                                    merchant: "Brown",
-                                    date: "2026-11-06"
-                                };
-                            }
-                            if (sql.includes("FROM user_settings")) {
-                                return { display_currency: "USD", monthly_budget: 0 };
-                            }
-                            if (sql.includes("SUM(CASE WHEN currency = 'USD'")) {
-                                return { total: 4000 };
-                            }
-                            return null;
-                        })
-                    })
-                }))
-            };
-
-            const mockEnv = { DB: mockDb, TELEGRAM_BOT_TOKEN: "mock_token" };
-            const callback = {
-                id: "cb_set",
-                data: "set_cat:888:Coffee",
-                from: { id: "849550186" },
-                message: { chat: { id: 12345 }, message_id: 111 }
-            };
-
-            await handleCallback(callback, mockEnv, "https://bot.example.com");
-
-            const answerCall = fetchSpy.mock.calls.find(c => typeof c[0] === "string" && c[0].includes("answerCallbackQuery"));
-            expect(answerCall).toBeDefined();
-            const answerPayload = JSON.parse(answerCall[1].body);
-            expect(answerPayload.text).toContain("Category changed to Coffee");
-
-            const editCall = fetchSpy.mock.calls.find(c => typeof c[0] === "string" && c[0].includes("editMessageText"));
-            expect(editCall).toBeDefined();
-            const receiptPayload = JSON.parse(editCall[1].body);
-            expect(receiptPayload.text).toContain("Expense Recorded");
-            expect(receiptPayload.text).toContain("☕ *Coffee*");
-        });
-    });
-
-    describe("5. Single-Card Receipt Confirmation in handleScanConfirm", () => {
+    describe("3. Single-Card Receipt Confirmation in handleScanConfirm", () => {
         it("handleScanConfirm should edit pending scan directly into full receipt without duplicate messages", async () => {
             const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
                 Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }))
@@ -304,24 +131,69 @@ describe("Category Reassignment, Single-Card Confirmation & Query Optimization",
             };
 
             const mockEnv = { DB: mockDb, TELEGRAM_BOT_TOKEN: "mock_token" };
-            await handleScanConfirm(mockEnv, 12345, "849550186", 12, 555, "cb_scan");
+            await handleScanConfirm(mockEnv, 12345, "849550186", 12, 333, "cb_scan");
 
-            // Verify only 1 message edit occurred (no intermediate plain text edit followed by new message)
-            const sendCalls = fetchSpy.mock.calls.filter(c => typeof c[0] === "string" && c[0].includes("sendMessage"));
-            expect(sendCalls.length).toBe(0); // Zero duplicate messages sent!
+            // Verify: No plain text "✅ Receipt Recorded" edit occurred
+            const plainTextEdit = fetchSpy.mock.calls.find(c => {
+                if (typeof c[0] !== "string" || !c[0].includes("editMessageText")) return false;
+                const body = JSON.parse(c[1]?.body || "{}");
+                return body.text === "✅ Receipt Recorded";
+            });
+            expect(plainTextEdit).toBeUndefined();
 
-            const editCalls = fetchSpy.mock.calls.filter(c => typeof c[0] === "string" && c[0].includes("editMessageText"));
-            expect(editCalls.length).toBe(1); // Exactly 1 seamless card edit!
-            const payload = JSON.parse(editCalls[0][1].body);
-            expect(payload.text).toContain("Expense Recorded");
-            expect(payload.text).toContain("Brown Coffee");
-            expect(payload.reply_markup.inline_keyboard.flat().some(b => b.text.includes("Category"))).toBe(true);
+            // Verify: Single edit transformed directly into full receipt
+            const receiptEdit = fetchSpy.mock.calls.find(c => {
+                if (typeof c[0] !== "string" || !c[0].includes("editMessageText")) return false;
+                const body = JSON.parse(c[1]?.body || "{}");
+                return body.text && body.text.includes("Expense Recorded") && body.text.includes("$4.5");
+            });
+            expect(receiptEdit).toBeDefined();
+
+            // Verify: No separate sendMessage call was fired
+            const sendMessageCalls = fetchSpy.mock.calls.filter(c => typeof c[0] === "string" && c[0].includes("sendMessage"));
+            expect(sendMessageCalls.length).toBe(0);
         });
     });
 
-    describe("6. Settings Menu Exchange Rate Visibility", () => {
-        it("sendSettingsMenu should clearly display active NBC exchange rate in settings summary", async () => {
-            setExchangeRateInMemory(4088, "NBC");
+    describe("4. Single-Home Architecture: Settings and Exchange Rate Separation", () => {
+        it("sendSettingsMenu should focus on personal preferences without exchange rate or CSV clutter", async () => {
+            const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+                Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+            );
+
+            const mockDb = {
+                prepare: vi.fn().mockImplementation((sql) => ({
+                    bind: vi.fn().mockReturnValue({
+                        first: vi.fn().mockImplementation(async () => {
+                            if (sql.includes("FROM user_settings")) {
+                                return {
+                                    display_currency: "KHR",
+                                    monthly_budget: 2000000,
+                                    voice_mode: "off",
+                                    briefing_mode: "on"
+                                };
+                            }
+                            return null;
+                        }),
+                        all: vi.fn().mockResolvedValue({ results: [] })
+                    })
+                }))
+            };
+
+            const mockEnv = { DB: mockDb, TELEGRAM_BOT_TOKEN: "mock_token" };
+            await sendSettingsMenu(mockEnv, 12345, "849550186");
+
+            expect(fetchSpy).toHaveBeenCalled();
+            const payload = JSON.parse(fetchSpy.mock.calls[0][1].body);
+            expect(payload.text).toContain("System Settings");
+            expect(payload.text).not.toContain("Exchange Rate:"); // Exchange rate removed from Settings
+
+            const buttons = payload.reply_markup.inline_keyboard.flat().map(b => b.text);
+            expect(buttons.some(t => t.includes("Export CSV"))).toBe(false); // CSV export removed from Settings
+        });
+
+        it("sendExchangeRateCard (/rate) should be the sole home for exchange rate and link to Finance Hub", async () => {
+            setExchangeRateInMemory(4088, "NBC Official");
 
             const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
                 Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }))
@@ -329,31 +201,21 @@ describe("Category Reassignment, Single-Card Confirmation & Query Optimization",
 
             const mockDb = {
                 prepare: vi.fn().mockReturnValue({
-                    bind: vi.fn().mockReturnValue({
-                        first: vi.fn().mockResolvedValue({
-                            display_currency: "USD",
-                            monthly_budget: 0,
-                            voice_mode: "off",
-                            briefing_mode: "on"
-                        })
-                    })
+                    first: vi.fn().mockResolvedValue({ value: JSON.stringify({ rate: 4088, source: "NBC" }) })
                 })
             };
 
             const mockEnv = { DB: mockDb, TELEGRAM_BOT_TOKEN: "mock_token" };
-            await sendSettingsMenu(mockEnv, 12345, "849550186", 777);
+            await sendExchangeRateCard(mockEnv, 12345, "849550186");
 
             expect(fetchSpy).toHaveBeenCalled();
             const payload = JSON.parse(fetchSpy.mock.calls[0][1].body);
-            expect(payload.text).toContain("Exchange Rate:");
-            expect(payload.text).toContain("1 USD = 4,088 KHR (NBC)");
+            expect(payload.text).toContain("Currency Exchange Rate");
+            expect(payload.text).toContain("1 USD = 4,088 KHR");
 
-            // Verifies keyboard structure remains 4 rows with all required buttons
-            const keyboard = payload.reply_markup.inline_keyboard;
-            expect(keyboard.length).toBe(4);
-            const buttonTexts = keyboard.flat().map(b => b.text);
-            expect(buttonTexts).toContain("💱 Currency: USD");
-            expect(buttonTexts).toContain("🎯 Set Budget");
+            const buttons = payload.reply_markup.inline_keyboard.flat();
+            expect(buttons.some(b => b.callback_data === "finance_hub")).toBe(true);
+            expect(buttons.some(b => b.callback_data === "settings")).toBe(false);
         });
     });
 });
