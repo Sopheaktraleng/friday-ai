@@ -2236,7 +2236,7 @@ describe("Bot Improvements & Stability", () => {
     });
 
     describe("Worker Scheduled Cron Handler", () => {
-        it("scheduled should trigger wake-up broadcast on dedicated wakeup cron", async () => {
+        it("scheduled should trigger morning briefing on dedicated briefing cron", async () => {
             const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
                 Promise.resolve(new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }))
             );
@@ -2245,15 +2245,40 @@ describe("Bot Improvements & Stability", () => {
                 prepare: vi.fn().mockImplementation(() => ({
                     bind: vi.fn().mockReturnValue({
                         all: vi.fn().mockResolvedValue({ results: [{ user_id: "849550186" }] }),
-                        first: vi.fn().mockResolvedValue(null),
+                        first: vi.fn().mockResolvedValue({ briefing_mode: "on" }),
                         run: vi.fn().mockResolvedValue({ meta: { changes: 1 } })
                     })
                 }))
             };
             const mockEnv = { DB: mockDb, TELEGRAM_BOT_TOKEN: "mock_token", ALLOWED_USER_IDS: "849550186" };
 
-            await worker.scheduled({ cron: "50 0 * * *" }, mockEnv);
+            await worker.scheduled({ cron: "0 1 * * *" }, mockEnv);
             expect(fetchSpy).toHaveBeenCalled();
+            fetchSpy.mockRestore();
+        });
+
+        it("scheduled should never trigger 7:50 AM wake-up broadcast", async () => {
+            const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+                Promise.resolve(new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }))
+            );
+            const mockDb = {
+                batch: vi.fn().mockResolvedValue([]),
+                prepare: vi.fn().mockImplementation(() => ({
+                    bind: vi.fn().mockReturnValue({
+                        all: vi.fn().mockResolvedValue({ results: [] }),
+                        first: vi.fn().mockResolvedValue({ briefing_mode: "on" }),
+                        run: vi.fn().mockResolvedValue({ meta: { changes: 0 } })
+                    })
+                }))
+            };
+            const mockEnv = { DB: mockDb, TELEGRAM_BOT_TOKEN: "mock_token", ALLOWED_USER_IDS: "849550186" };
+
+            await worker.scheduled({ cron: "50 0 * * *" }, mockEnv);
+            const wakeupCalls = fetchSpy.mock.calls.filter(call => {
+                const body = typeof call[1]?.body === "string" ? call[1].body : "";
+                return body.includes("Wake Up") || (typeof call[0] === "string" && call[0].includes("sendVoice"));
+            });
+            expect(wakeupCalls.length).toBe(0);
             fetchSpy.mockRestore();
         });
     });

@@ -7,7 +7,7 @@ import { handleMessage } from "./handlers/message.js";
 import { handleCallback } from "./handlers/callback.js";
 import { processDueReminders } from "./modules/reminders/cron.js";
 import { sendWeeklyScheduledReports } from "./modules/finance/views.js";
-import { sendDailyScheduledBriefings, sendDailyScheduledWakeup } from "./modules/copilot/briefing.js";
+import { sendDailyScheduledBriefings } from "./modules/copilot/briefing.js";
 import { sendMessage, answerCallback, syncBotCommands } from "./services/telegram.js";
 import { isUserAuthorizedAsync } from "./config/constants.js";
 
@@ -169,14 +169,7 @@ export default {
 
             // Cloudflare cron dispatch checks
             const isDedicatedBriefing = event.cron === "0 1 * * *";
-            const isDedicatedWakeup = event.cron === "50 0 * * *";
             const isGeneralMinuteCron = event.cron === "* * * * *" || !event.cron;
-
-            // Daily at 00:50 UTC (7:50 AM ICT) - Morning Wake-up Broadcast
-            const isWakeupSlot = isDedicatedWakeup || (isGeneralMinuteCron && utcHours === 0 && utcMinutes === 50);
-            if (isWakeupSlot) {
-                await sendDailyScheduledWakeup(env);
-            }
 
             // Daily at 01:00 UTC (8:00 AM ICT) - Morning Greeting, Weekly Report & Database Hygiene
             const isBriefingSlot = isDedicatedBriefing || (isGeneralMinuteCron && utcHours === 1 && utcMinutes === 0);
